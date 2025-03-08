@@ -21,3 +21,8 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+
+# Project-specific ignores
+flmbentio/
+.DS_Store
+scratch-files-for-cascade/
