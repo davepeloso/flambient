@@ -22,6 +22,7 @@
             --accent-color: #4a9eff;
             --border-color: #333;
             --font-mono: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+            --base-font-size: 0.55rem;
         }
 
         /* Core layout */
@@ -32,6 +33,8 @@
             min-height: 100vh;
             display: flex;
             flex-direction: column;
+            font-size: var(--base-font-size);
+            line-height: 1.6;
         }
 
         /* Header/Nav */
@@ -45,7 +48,7 @@
         }
 
         .flambient-title {
-            font-size: 1.2rem;
+            font-size: calc(var(--base-font-size) * 2.2);
             color: var(--accent-color);
             text-decoration: none;
         }
@@ -60,6 +63,7 @@
             text-decoration: none;
             padding: 0.5rem;
             transition: color 0.2s ease;
+            font-size: calc(var(--base-font-size) * 2);
         }
 
         .flambient-nav a:hover {
@@ -98,19 +102,19 @@
 
         /* Typography */
         .flambient-title-large {
-            font-size: 2rem;
+            font-size: calc(var(--base-font-size) * 3.6);
             color: var(--accent-color);
             margin-bottom: 1rem;
         }
 
         .flambient-subtitle {
-            font-size: 1.4rem;
+            font-size: calc(var(--base-font-size) * 2.5);
             color: var(--accent-color);
             margin-bottom: 1rem;
         }
 
         .flambient-text {
-            font-size: 1.1rem;
+            font-size: calc(var(--base-font-size) * 2);
             line-height: 1.6;
         }
 
@@ -124,6 +128,7 @@
             margin: 0.5rem 0;
             padding-left: 1.5rem;
             position: relative;
+            font-size: calc(var(--base-font-size) * 2);
         }
 
         .flambient-list li::before {
@@ -142,8 +147,8 @@
             color: var(--accent-color);
             padding: 0.8rem 1.5rem;
             text-decoration: none;
-            font-family: var(--font-mono), system-ui;
-            font-size: 1.1rem;
+            font-family: var(--font-mono);
+            font-size: calc(var(--base-font-size) * 2);
             transition: all 0.2s ease;
         }
 
@@ -158,7 +163,7 @@
             background-color: var(--bg-color);
             border-top: 1px solid var(--border-color);
             padding: 1rem;
-            font-size: 0.9rem;
+            font-size: calc(var(--base-font-size) * 1.6);
         }
 
         /* Utility classes */
