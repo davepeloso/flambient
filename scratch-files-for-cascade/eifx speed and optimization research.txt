@@ -1,0 +1,22 @@
+EIFX optimization Research:
+
+Renaming and/or Moving Files
+By writing a new value to the FileName and/or Directory tags, files can be renamed and/or moved to different directories. This can be a very powerful tool in combination with the -d (date format) option for organizing images by date/time. For example, the following command renames all images in directory "DIR" according to the individual file's creation date in the form "YYYYmmdd_HHMMSS.ext".
+
+exiftool "-FileName<CreateDate" -d "%Y%m%d_%H%M%S.%%e" DIR
+Or a new directory can be specified by setting the value of the Directory tag. For example, the following command moves all images originally in directory "DIR" into a directory hierarchy organized by year/month/day:
+
+exiftool "-Directory<DateTimeOriginal" -d "%Y/%m/%d" DIR
+Read here for more details about this powerful feature.
+
+Improving Performance
+There is a significant overhead in loading ExifTool, so performance may be greatly improved by taking advantage of ExifTool's batch processing capabilities (the ability to process multiple files or entire directories with a single command) to reduce the number of executed commands when performing complex operations or processing multiple files.† [One exiftool user documented a 60x speed increase by processing a large number of files with a single command instead of running exiftool separately on each file.] Also, the -execute option may be used to perform multiple independent operations with a single invocation of exiftool, and together with the -stay_open option provides a method for calling applications to avoid this startup overhead.
+
+It has also been observed that the loading time of ExifTool for Windows increases significantly when Windows Defender is active. Disabling Windows Defender may speed things up significantly.
+
+The processing speed of ExifTool can be improved when extracting information by reducing the amount of work that it must do. Decrease the number of extracted tags by specifying desired tags individually (-TAG) or by group (-GROUP:all), and disable the composite tags (-e) and the print conversions (-n) if these features aren't required. Note that the exclude options (-x or --TAG) are not very efficient, and may have a negative impact on performance if a large number of tags are excluded individually. The exception is XMP groups, which are bypassed in processing so they are never even extracted -- specifying --XMP-crs:all and -XMP-crd:all may speed processing significantly by avoiding processing of bulky Adobe image-editing information. The API IgnoreTags option (added in ExifTool 12.43) may also be used for significant speed benefits in some cases, especially when memory usage is significant because this may significantly reduced the required memory.
+
+The -fast option can significantly increase speed when extracting information from JPEG images which are piped across a slow network connection. However, with this option any information in a JPEG trailer is not extracted. For more substantial speed benefits, -fast2 may be used to also avoid extracting MakerNote information if this is not required, or -fast4 if only pseudo System tags are required.
+
+When writing, avoid copying tags (with -tagsFromFile) or using the -if or -fileOrder option because these will add the extra step of extracting tags from the file. Without these the write operation is accomplished with a single pass of each file.
+

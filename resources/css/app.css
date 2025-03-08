@@ -1,0 +1,96 @@
+@import 'tailwindcss';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+@source "../**/*.blade.php";
+@source "../**/*.js";
+@source "../**/*.vue";
+
+@theme {
+    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-mono: 'Courier New', monospace;
+    --color-bg-dark: #1a1a1a;
+    --color-text-light: #f0f0f0;
+    --color-accent: #4a9eff;
+}
+
+/* Terminal-inspired base styles */
+.flambient {
+    font-family: var(--font-mono);
+    background-color: var(--color-bg-dark);
+    color: var(--color-text-light);
+    line-height: 1.6;
+}
+
+/* Terminal card component */
+.flambient-terminal-card {
+    border: 1px solid var(--color-text-light);
+    border-radius: 4px;
+    padding: 2rem;
+    margin: 2rem auto;
+    max-width: 800px;
+    background-color: var(--color-bg-dark);
+}
+
+/* Typography */
+.flambient-title-large {
+    font-size: 2rem;
+    font-weight: bold;
+    color: var(--color-accent);
+    margin-bottom: 1.5rem;
+}
+
+.flambient-subtitle {
+    font-size: 1.5rem;
+    color: var(--color-text-light);
+    margin-bottom: 1rem;
+}
+
+.flambient-text {
+    font-size: 1rem;
+    color: var(--color-text-light);
+    margin-bottom: 1rem;
+}
+
+/* Lists */
+.flambient-list {
+    list-style-type: none;
+    padding-left: 1rem;
+}
+
+.flambient-list li {
+    margin-bottom: 0.5rem;
+    position: relative;
+}
+
+.flambient-list li::before {
+    content: ">";
+    position: absolute;
+    left: -1rem;
+    color: var(--color-accent);
+}
+
+/* Terminal sections */
+.flambient-terminal-section {
+    margin-top: 2rem;
+    padding: 1rem 0;
+    border-top: 1px solid rgba(240, 240, 240, 0.1);
+}
+
+/* Buttons */
+.flambient-button {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    background-color: transparent;
+    border: 1px solid var(--color-accent);
+    color: var(--color-accent);
+    text-decoration: none;
+    border-radius: 4px;
+    transition: all 0.3s ease;
+}
+
+.flambient-button:hover {
+    background-color: var(--color-accent);
+    color: var(--color-bg-dark);
+}
