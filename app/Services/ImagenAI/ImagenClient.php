@@ -154,7 +154,7 @@ class ImagenClient
 
             $response = Http::withoutVerifying()  // S3 presigned URLs may have cert issues
                 ->timeout(300)  // 5 minute timeout for large files
-                ->withHeaders([])  // Explicitly no headers - S3 presigned URL has them
+                ->withHeaders(['Content-Type' => ''])  // MUST be empty - S3 signature requires it
                 ->withBody($fileContent)  // Raw binary content
                 ->put($uploadLink->uploadUrl);
 
