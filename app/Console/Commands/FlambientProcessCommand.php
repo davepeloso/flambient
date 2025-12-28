@@ -738,33 +738,48 @@ class FlambientProcessCommand extends Command
 
     /**
      * Prompt user to select an Imagen AI editing profile.
-     * Offers quick selection from favorites or browse all profiles.
+     * Fetches profiles from API and displays with image type information.
      */
     private function selectImagenProfile(): string
     {
-        $favorites = config('imagen-profiles.favorites', []);
-        $allProfiles = config('imagen-profiles.all', []);
         $default = config('imagen-profiles.default');
-
-        // If no favorites configured, just use default
-        if (empty($favorites)) {
-            return (string)$default;
-        }
 
         $this->newLine();
         info('Select Imagen AI Editing Profile');
         note('Profiles determine the AI editing style applied to your images');
 
-        // Ask if they want to select or use default
+        // Fetch profiles from Imagen AI API
+        try {
+            $imagenClient = new \App\Services\ImagenAI\ImagenClient();
+            $allProfiles = $imagenClient->getProfiles();
+        } catch (\Exception $e) {
+            warning("Failed to fetch profiles from API: {$e->getMessage()}");
+            note("Falling back to default profile: {$default}");
+            return (string)$default;
+        }
+
+        if ($allProfiles->isEmpty()) {
+            warning("No profiles available from API");
+            note("Using default profile: {$default}");
+            return (string)$default;
+        }
+
+        // Separate profiles by image type
+        $jpgProfiles = $allProfiles->filter(fn($p) => strtoupper($p->imageType ?? '') === 'JPG');
+        $rawProfiles = $allProfiles->filter(fn($p) => strtoupper($p->imageType ?? '') === 'RAW');
+        $otherProfiles = $allProfiles->filter(fn($p) => empty($p->imageType) || !in_array(strtoupper($p->imageType), ['JPG', 'RAW']));
+
+        // Ask which type to browse
         $choice = select(
-            label: 'How would you like to choose a profile?',
+            label: 'Which profiles would you like to browse?',
             options: [
-                'favorites' => "⭐ Quick Select ({$this->formatCount(count($favorites))} favorites)",
-                'all' => "📋 Browse All Profiles ({$this->formatCount(count($allProfiles))} available)",
+                'jpg' => "📸 JPEG Profiles ({$jpgProfiles->count()} available) - Recommended for flambient workflow",
+                'raw' => "📷 RAW Profiles ({$rawProfiles->count()} available)",
+                'all' => "📋 All Profiles ({$allProfiles->count()} total)",
                 'default' => "✓ Use Default ({$default})",
             ],
-            default: 'favorites',
-            hint: 'Favorites are your most-used profiles for quick access'
+            default: 'jpg',
+            hint: 'JPG profiles work with your blended JPEG images'
         );
 
         // Use default
@@ -773,29 +788,44 @@ class FlambientProcessCommand extends Command
             return (string)$default;
         }
 
-        // Select from favorites (quick select)
-        if ($choice === 'favorites') {
-            $selectedKey = select(
-                label: 'Choose from your favorite profiles',
-                options: $favorites,
-                hint: 'These are your 3 most-used profiles'
-            );
+        // Filter profiles based on choice
+        $profilesToShow = match($choice) {
+            'jpg' => $jpgProfiles,
+            'raw' => $rawProfiles,
+            'all' => $allProfiles,
+            default => $jpgProfiles,
+        };
 
-            $profileName = $favorites[$selectedKey] ?? "Profile {$selectedKey}";
-            note("✓ Selected: {$profileName} (Profile: {$selectedKey})");
-            return (string)$selectedKey;
+        if ($profilesToShow->isEmpty()) {
+            warning("No profiles found for this category");
+            note("Using default profile: {$default}");
+            return (string)$default;
         }
 
-        // Browse all profiles
+        // Format profiles for display: "PROFILE_NAME [JPG] - Personal"
+        $profileOptions = $profilesToShow->mapWithKeys(function ($profile) {
+            $imageType = strtoupper($profile->imageType ?? 'UNKNOWN');
+            $profileType = $profile->profileType ?? 'Unknown';
+            $label = "{$profile->name} [{$imageType}] - {$profileType}";
+            return [$profile->key => $label];
+        })->toArray();
+
+        // Let user select
         $selectedKey = select(
-            label: 'Choose from all available profiles',
-            options: $allProfiles,
-            scroll: 10, // Show 10 at a time for easier scrolling
-            hint: 'Scroll through all available Imagen AI profiles'
+            label: 'Choose your editing profile',
+            options: $profileOptions,
+            scroll: 10,
+            hint: 'Image type shown in [brackets]'
         );
 
-        $profileName = $allProfiles[$selectedKey] ?? "Profile {$selectedKey}";
-        note("✓ Selected: {$profileName} (Profile: {$selectedKey})");
+        // Find selected profile for confirmation message
+        $selectedProfile = $profilesToShow->firstWhere('key', $selectedKey);
+        if ($selectedProfile) {
+            note("✓ Selected: {$selectedProfile->name} [{$selectedProfile->imageType}] (Profile: {$selectedKey})");
+        } else {
+            note("✓ Selected profile: {$selectedKey}");
+        }
+
         return (string)$selectedKey;
     }
 
