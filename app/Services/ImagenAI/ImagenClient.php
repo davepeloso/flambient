@@ -148,30 +148,40 @@ class ImagenClient
         }
 
         try {
-            // Match Python SDK: raw binary upload with NO Content-Type header
-            // S3 presigned URLs include all necessary headers in the signed URL
+            // Use Guzzle directly to avoid Laravel adding Content-Type header
+            // S3 presigned URLs sign with NO Content-Type, so we must send exactly that
             $fileContent = File::get($localFilePath);
 
-            $response = Http::withoutVerifying()  // S3 presigned URLs may have cert issues
-                ->timeout(300)  // 5 minute timeout for large files
-                ->withHeaders(['Content-Type' => ''])  // MUST be empty - S3 signature requires it
-                ->withBody($fileContent)  // Raw binary content
-                ->put($uploadLink->uploadUrl);
+            // Create Guzzle client directly (bypasses Laravel's HTTP facade)
+            $guzzle = new \GuzzleHttp\Client([
+                'verify' => false,  // S3 presigned URLs may have cert issues
+                'timeout' => 300,
+            ]);
 
-            if (!$response->successful()) {
-                $errorBody = $response->body();
+            $response = $guzzle->put($uploadLink->uploadUrl, [
+                'body' => $fileContent,
+                'headers' => [],  // Absolutely NO headers - S3 signature requires this
+            ]);
+
+            if ($response->getStatusCode() >= 400) {
+                $errorBody = $response->getBody()->getContents();
                 Log::error("Upload failed for {$uploadLink->filename}", [
-                    'status' => $response->status(),
+                    'status' => $response->getStatusCode(),
                     'body' => $errorBody,
                     'file_size' => strlen($fileContent),
                     'url_host' => parse_url($uploadLink->uploadUrl, PHP_URL_HOST),
                 ]);
 
                 throw new ImagenException(
-                    "Failed to upload {$uploadLink->filename}: HTTP {$response->status()}",
-                    $response->status()
+                    "Failed to upload {$uploadLink->filename}: HTTP {$response->getStatusCode()}",
+                    $response->getStatusCode()
                 );
             }
+
+            Log::info("Successfully uploaded {$uploadLink->filename}", [
+                'file_size' => strlen($fileContent),
+                'status' => $response->getStatusCode(),
+            ]);
 
             return true;
         } catch (\Exception $e) {
@@ -509,56 +519,33 @@ class ImagenClient
     /**
      * Verify that uploaded files are accessible in the project.
      *
-     * This helps catch upload failures early before starting the editing workflow,
-     * preventing the "No images were uploaded for this project" error.
+     * NOTE: This is based on upload result counts, not an API call.
+     * There's no dedicated "verify uploads" endpoint in Imagen API.
      *
-     * @param string $projectUuid
-     * @param array<string> $expectedFilenames List of filenames that should be uploaded
-     * @return bool True if verification passes
-     * @throws ImagenException
+     * @param ImagenUploadResult $uploadResult
+     * @return bool True if all uploads succeeded
      */
-    public function verifyUploadsReady(string $projectUuid, array $expectedFilenames): bool
+    public function verifyUploadsReady(ImagenUploadResult $uploadResult): bool
     {
-        // Give S3 a moment to confirm all uploads
-        sleep(2);
+        // Verification is simple: did all uploads succeed?
+        $isFullySuccessful = $uploadResult->isFullySuccessful();
 
-        try {
-            // Try to request upload links again - this validates the files exist in the project
-            $filesList = array_map(fn($name) => ['file_name' => $name], $expectedFilenames);
-
-            $response = $this->http->post(
-                "{$this->baseUrl}/projects/{$projectUuid}/get_temporary_upload_links",
-                ['files_list' => $filesList]
-            );
-
-            if (!$response->successful()) {
-                Log::warning("Upload verification failed", [
-                    'project' => $projectUuid,
-                    'status' => $response->status(),
-                    'body' => $response->body(),
-                    'expected_files' => count($expectedFilenames),
-                ]);
-                return false;
-            }
-
-            $files = $response->json('data.files_list', []);
-
-            if (count($files) !== count($expectedFilenames)) {
-                Log::warning("Upload count mismatch", [
-                    'expected' => count($expectedFilenames),
-                    'received' => count($files),
-                ]);
-                return false;
-            }
-
-            return true;
-        } catch (\Exception $e) {
-            Log::error("Upload verification exception", [
-                'error' => $e->getMessage(),
-                'project' => $projectUuid,
+        if (!$isFullySuccessful) {
+            Log::warning("Upload verification failed", [
+                'project' => $uploadResult->projectUuid,
+                'total' => $uploadResult->totalFiles,
+                'succeeded' => count($uploadResult->succeeded),
+                'failed' => count($uploadResult->failed),
+                'failed_files' => $uploadResult->failed,
             ]);
-            return false;
+        } else {
+            Log::info("Upload verification passed", [
+                'project' => $uploadResult->projectUuid,
+                'total' => $uploadResult->totalFiles,
+            ]);
         }
+
+        return $isFullySuccessful;
     }
 
     /**

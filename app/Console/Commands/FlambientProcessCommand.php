@@ -500,28 +500,30 @@ class FlambientProcessCommand extends Command
                 note("✓ Upload complete: {$uploadedCount}/{$uploadResult->totalFiles} files ({$uploadResult->getSuccessRate()}% success)");
                 $this->newLine();
 
-                // Verify uploads reached Imagen AI (prevents "No images uploaded" error)
-                info("Verifying uploads with Imagen AI...");
-                $filenames = array_map('basename', $blendedImages);
-                $isVerified = spin(
-                    callback: fn() => $imagenClient->verifyUploadsReady($imagenProject->uuid, $filenames),
-                    message: 'Checking that files are accessible...'
-                );
+                // Verify uploads succeeded (prevents "No images uploaded" error)
+                info("Verifying upload results...");
+                $isVerified = $imagenClient->verifyUploadsReady($uploadResult);
 
                 if (!$isVerified) {
-                    warning("⚠ Upload verification failed - files may not be accessible to Imagen AI");
-                    warning("This usually means the upload didn't complete successfully.");
-
-                    if (!confirm('Try to proceed with editing anyway? (may fail)', default: false)) {
-                        $this->newLine();
-                        note("Upload failed. Possible causes:");
-                        note("  • Files were moved/deleted during upload");
-                        note("  • Network connection interrupted");
-                        note("  • S3 upload timeout");
-                        return self::FAILURE;
+                    $this->newLine();
+                    warning("❌ Upload verification FAILED!");
+                    warning("Files that failed: " . implode(', ', array_slice($uploadResult->failed, 0, 5)));
+                    if (count($uploadResult->failed) > 5) {
+                        warning("... and " . (count($uploadResult->failed) - 5) . " more");
                     }
+
+                    $this->newLine();
+                    note("Common causes:");
+                    note("  • S3 signature mismatch (Content-Type header issue)");
+                    note("  • Network timeouts or connection issues");
+                    note("  • Files moved/deleted during upload");
+                    note("  • S3 presigned URL expired");
+
+                    $this->newLine();
+                    warning("Cannot proceed with editing - no files were successfully uploaded.");
+                    return self::FAILURE;
                 } else {
-                    note("✓ Upload verified - all files accessible to Imagen AI");
+                    note("✓ Upload verified - all {$uploadResult->totalFiles} files uploaded successfully");
                 }
 
                 $this->newLine();
