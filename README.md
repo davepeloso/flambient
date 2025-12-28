@@ -4,65 +4,52 @@ A **production-ready Laravel 11 CLI application** for automated flambient photog
 
 > **Flambient Photography**: A real estate photography technique combining ambient (natural light) and flash (artificial light) exposures using advanced blending to create perfectly balanced, professional interior photos.
 
-[![PHP](https://img.shields.io/badge/PHP-8.2+-777BB4?style=flat&logo=php)](https://php.net)
-[![Laravel](https://img.shields.io/badge/Laravel-11-FF2D20?style=flat&logo=laravel)](https://laravel.com)
-[![Tests](https://img.shields.io/badge/Tests-46%20Passing-00D66A?style=flat)]()
-[![License](https://img.shields.io/badge/License-MIT-green?style=flat)]()
+[![PHP](https://img.shields.io/badge/PHP-8.2+-777BB4?style=flat&logo=php)](https://php.net) [![Laravel](https://img.shields.io/badge/Laravel-11-FF2D20?style=flat&logo=laravel)](https://laravel.com) [![Tests](https://img.shields.io/badge/Tests-46%20Passing-00D66A?style=flat)]() [![License](https://img.shields.io/badge/License-MIT-green?style=flat)]()
 
----
+------------------------------------------------------------------------
 
 ## 📖 Table of Contents
 
-- [Features](#-features)
-- [Architecture](#-architecture)
-- [Installation](#-installation)
-- [Quick Start](#-quick-start)
-- [Usage](#-usage)
-- [Configuration](#-configuration)
-- [Testing](#-testing)
-- [Project Structure](#-project-structure)
-- [API Documentation](#-api-documentation)
-- [Future Improvements](#-future-improvements)
-- [Contributing](#-contributing)
+-   [Features](#-features)
+-   [Architecture](#-architecture)
+-   [Installation](#-installation)
+-   [Quick Start](#-quick-start)
+-   [Usage](#-usage)
+-   [Configuration](#-configuration)
+-   [Testing](#-testing)
+-   [Project Structure](#-project-structure)
+-   [API Documentation](#-api-documentation)
+-   [Future Improvements](#-future-improvements)
+-   [Contributing](#-contributing)
 
----
+------------------------------------------------------------------------
 
 ## ✨ Features
 
 ### **Complete End-to-End Workflow**
 
-**Local Processing:**
-- ✅ **Flexible EXIF Classification** - Choose from 6+ fields (Flash, Exposure Mode, White Balance, ISO, etc.)
-- ✅ **Dual EXIF Extraction** - Numeric values for logic + human-readable labels for display
-- ✅ **Smart Image Grouping** - Automatic pairing of ambient/flash sequences by timestamp
-- ✅ **ImageMagick Blending** - 7-step flambient algorithm with customizable parameters
-- ✅ **Batch Processing** - Handle hundreds of images efficiently
+**Local Processing:** - ✅ **Flexible EXIF Classification** - Choose from 6+ fields (Flash, Exposure Mode, White Balance, ISO, etc.) - ✅ **Dual EXIF Extraction** - Numeric values for logic + human-readable labels for display - ✅ **Smart Image Grouping** - Automatic pairing of ambient/flash sequences by timestamp - ✅ **ImageMagick Blending** - 7-step flambient algorithm with customizable parameters - ✅ **Batch Processing** - Handle hundreds of images efficiently
 
-**Cloud Enhancement (Optional):**
-- ✅ **Imagen AI Integration** - Native PHP client for automated cloud enhancement
-- ✅ **Progress Tracking** - Real-time upload/processing/download progress with emojis
-- ✅ **Automatic Polling** - Monitor AI processing until completion (up to 2 hours)
-- ✅ **JPEG Export** - Automatic conversion and download of enhanced images
-- ✅ **Resume Capability** - Save project UUID to database for later access
+**Cloud Enhancement (Optional):** - ✅ **Imagen AI Integration** - Native PHP client for automated cloud enhancement - ✅ **Progress Tracking** - Real-time upload/processing/download progress with emojis - ✅ **Automatic Polling** - Monitor AI processing until completion (up to 2 hours) - ✅ **JPEG Export** - Automatic conversion and download of enhanced images - ✅ **Resume Capability** - Save project UUID to database for later access
 
 ### **Developer Experience**
 
-- ✅ **Laravel Prompts** - Beautiful interactive CLI with validation
-- ✅ **Type Safety** - PHP 8.2+ readonly classes, backed enums
-- ✅ **Database State** - SQLite tracks all workflow execution
-- ✅ **Comprehensive Testing** - 46 PHPUnit tests with 100% Http::fake() coverage
-- ✅ **Error Handling** - Graceful failures with actionable messages
-- ✅ **Configurable** - Environment-based settings with sane defaults
+-   ✅ **Laravel Prompts** - Beautiful interactive CLI with validation
+-   ✅ **Type Safety** - PHP 8.2+ read only classes, backed enums
+-   ✅ **Database State** - SQLite tracks all workflow execution
+-   ✅ **Comprehensive Testing** - 46 PHPUnit tests with 100% Http::fake() coverage
+-   ✅ **Error Handling** - Graceful failures with actionable messages
+-   ✅ **Configurable** - Environment-based settings with sane defaults
 
 ### **Production Ready**
 
-- ✅ **State Machine** - 8-step workflow with explicit transitions
-- ✅ **Audit Trail** - Database logging of all operations
-- ✅ **Progress Indicators** - Spinners, tables, emoji status updates
-- ✅ **Resumable** - Pause/resume long-running operations
-- ✅ **Testable** - Mock all external dependencies (exiftool, ImageMagick, Imagen API)
+-   ✅ **State Machine** - 8-step workflow with explicit transitions
+-   ✅ **Audit Trail** - Database logging of all operations
+-   ✅ **Progress Indicators** - Spinners, tables, emoji status updates
+-   ✅ **Resumable** - Pause/resume long-running operations
+-   ✅ **Testable** - Mock all external dependencies (exiftool, ImageMagick, Imagen API)
 
----
+------------------------------------------------------------------------
 
 ## 🏗️ Architecture
 
@@ -70,28 +57,28 @@ This application represents a **complete architectural redesign** from fragile s
 
 ### **Key Design Principles**
 
-1. **Explicit State Management** - All workflow state persisted to SQLite
-2. **Type Safety** - Enums, DTOs, readonly classes throughout
-3. **Separation of Concerns** - Services for EXIF, ImageMagick, Imagen AI
-4. **Laravel-Native** - HTTP client, Prompts, Collections, Eloquent
-5. **Testability** - All external dependencies mockable
+1.  **Explicit State Management** - All workflow state persisted to SQLite
+2.  **Type Safety** - Enums, DTOs, readonly classes throughout
+3.  **Separation of Concerns** - Services for EXIF, ImageMagick, Imagen AI
+4.  **Laravel-Native** - HTTP client, Prompts, Collections, Eloquent
+5.  **Testability** - All external dependencies mockable
 
 ### **Workflow Steps**
 
-| Step | Name | Purpose | Skippable |
-|------|------|---------|-----------|
-| 1 | **Prepare** | Validate inputs, create workspace | ❌ |
-| 2 | **Analyze** | Extract EXIF, classify & group images | ❌ |
-| 3 | **Process** | Generate & execute ImageMagick scripts | ❌ |
-| 4 | **Upload** | Upload blended images to Imagen AI | ✅ `--local` |
-| 5 | **Edit** | Submit for AI enhancement | ✅ `--local` |
-| 6 | **Monitor** | Poll processing status | ✅ `--local` |
-| 7 | **Export** | Convert to JPEG format | ✅ `--local` |
-| 8 | **Download** | Retrieve enhanced images | ✅ `--local` |
+| Step | Name         | Purpose                                | Skippable    |
+|------|--------------|----------------------------------------|--------------|
+| 1    | **Prepare**  | Validate inputs, create workspace      | ❌           |
+| 2    | **Analyze**  | Extract EXIF, classify & group images  | ❌           |
+| 3    | **Process**  | Generate & execute ImageMagick scripts | ❌           |
+| 4    | **Upload**   | Upload blended images to Imagen AI     | ✅ `--local` |
+| 5    | **Edit**     | Submit for AI enhancement              | ✅ `--local` |
+| 6    | **Monitor**  | Poll processing status                 | ✅ `--local` |
+| 7    | **Export**   | Convert to JPEG format                 | ✅ `--local` |
+| 8    | **Download** | Retrieve enhanced images               | ✅ `--local` |
 
 ### **Database Schema**
 
-```sql
+``` sql
 workflow_runs
 ├── id (UUID primary key)
 ├── project_name (string, unique)
@@ -113,23 +100,23 @@ workflow_files
 └── exif_data (JSON)
 ```
 
----
+------------------------------------------------------------------------
 
 ## 📦 Installation
 
 ### **Prerequisites**
 
-- **PHP 8.2+** with SQLite extension
-- **Composer** for dependency management
-- **ImageMagick** (`magick` command available)
-- **exiftool** for EXIF metadata extraction
-- **Imagen AI API key** (optional, for cloud enhancement)
+-   **PHP 8.2+** with SQLite extension
+-   **Composer** for dependency management
+-   **ImageMagick** (`magick` command available)
+-   **exiftool** for EXIF metadata extraction
+-   **Imagen AI API key** (optional, for cloud enhancement)
 
 ### **Setup**
 
-```bash
+``` bash
 # 1. Clone repository
-git clone https://github.com/yourusername/terminal-flazsh.git
+git clone https://github.com/davepeloso/flambient.git
 cd terminal-flazsh
 
 # 2. Install dependencies
@@ -151,7 +138,7 @@ php artisan migrate
 
 ### **Verify Installation**
 
-```bash
+``` bash
 # Check PHP version
 php -v  # Should be 8.2+
 
@@ -165,62 +152,52 @@ exiftool -ver
 php artisan test
 ```
 
----
+------------------------------------------------------------------------
 
 ## 🚀 Quick Start
 
 ### **Local-Only Processing (No Cloud)**
 
-```bash
+``` bash
 php artisan flambient:process \
-  --project="my-first-shoot" \
-  --dir="/path/to/images" \
+  --project="(date '+%m-%d-%y')_ID$(gshuf -i 10000-99999 -n 1)" \
+  --dir="public/123-main-street" \
   --local
+
+  echo "$(date '+%m-%d-%y')_ID$(gshuf -i 10000-99999 -n 1)"
+  ID="$(date '+%m-%d-%y')_ID$(gshuf -i 10000-99999 -n 1)"
+echo "$ID"
 ```
 
-This will:
-1. Extract EXIF metadata from your images
-2. Classify images as Ambient or Flash based on EXIF fields
-3. Group images by timestamp
-4. Generate ImageMagick blend scripts
-5. Create blended flambient images in `storage/flambient/my-first-shoot/flambient/`
+This will: 1. Extract EXIF metadata from your images 2. Classify images as Ambient or Flash based on EXIF fields 3. Group images by timestamp 4. Generate ImageMagick blend scripts 5. Create blended flambient images in `storage/flambient/my-first-shoot/flambient/`
 
 ### **Full Workflow (With Imagen AI)**
 
-```bash
+``` bash
 php artisan flambient:process \
   --project="real-estate-shoot" \
   --dir="/path/to/images"
 ```
 
-This will:
-1. Perform local ImageMagick blending (steps 1-3)
-2. Upload blended images to Imagen AI (step 4)
-3. Monitor AI processing with real-time progress (step 5-6)
-4. Export and download enhanced images (steps 7-8)
-5. Save both blended and enhanced versions locally
+This will: 1. Perform local ImageMagick blending (steps 1-3) 2. Upload blended images to Imagen AI (step 4) 3. Monitor AI processing with real-time progress (step 5-6) 4. Export and download enhanced images (steps 7-8) 5. Save both blended and enhanced versions locally
 
 ### **Interactive Mode**
 
 Simply run without arguments for a guided experience:
 
-```bash
+``` bash
 php artisan flambient:process
 ```
 
-The CLI will interactively prompt for:
-- Project name
-- Image directory
-- EXIF classification strategy
-- Processing mode (local vs. cloud)
+The CLI will interactively prompt for: - Project name - Image directory - EXIF classification strategy - Processing mode (local vs. cloud)
 
----
+------------------------------------------------------------------------
 
 ## 📖 Usage
 
 ### **Command Options**
 
-```bash
+``` bash
 php artisan flambient:process [options]
 
 Options:
@@ -234,7 +211,7 @@ Options:
 
 During analysis, you'll choose which EXIF field to use for classifying Ambient vs. Flash:
 
-```
+```         
 ┌ Which EXIF field should identify Ambient images? ────┐
 │ ● Flash (Flash = 16 for Ambient)                      │
 │ ○ Exposure Program                                    │
@@ -248,7 +225,7 @@ During analysis, you'll choose which EXIF field to use for classifying Ambient v
 
 You can optionally view sample EXIF data first:
 
-```
+```         
 ┌ How many sample images to display? ───────────────────┐
 │ ● 3 samples                                            │
 │ ○ 5 samples                                            │
@@ -267,7 +244,7 @@ You can optionally view sample EXIF data first:
 
 ### **Example Output**
 
-```
+```         
 Step 1/3: Preparing workspace
 ⠧ Validating inputs and creating directories...
 ✓ Workspace created: /storage/flambient/my-shoot
@@ -289,7 +266,7 @@ Steps 4-8: Skipped (local-only mode - Imagen AI processing disabled)
 
 ### **With Imagen AI**
 
-```
+```         
 Step 4/8: Upload to Imagen AI
 ⚠ This will upload 27 blended images to Imagen AI for enhancement.
 
@@ -341,7 +318,7 @@ Step 8/8: Downloading enhanced images
 🌐 Imagen project: https://app.imagen-ai.com/projects/abc-123-def-456
 ```
 
----
+------------------------------------------------------------------------
 
 ## ⚙️ Configuration
 
@@ -351,7 +328,7 @@ Edit `.env` to configure:
 
 #### **Imagen AI Settings**
 
-```env
+``` env
 IMAGEN_AI_API_KEY=your_api_key_here
 IMAGEN_API_BASE_URL=https://api-beta.imagen-ai.com/v1
 IMAGEN_PROFILE_KEY=309406
@@ -362,7 +339,7 @@ IMAGEN_POLL_MAX_ATTEMPTS=240         # Max attempts (240 × 30s = 2 hours)
 
 #### **ImageMagick Settings**
 
-```env
+``` env
 IMAGEMAGICK_BINARY=magick
 IMAGEMAGICK_LEVEL_LOW=40%            # Ambient mask threshold
 IMAGEMAGICK_LEVEL_HIGH=140%          # Ambient mask upper bound
@@ -374,7 +351,7 @@ IMAGEMAGICK_DARKEN_SUFFIX=_tmp
 
 #### **Workflow Settings**
 
-```env
+``` env
 FLAMBIENT_STORAGE_PATH=              # Default: storage/flambient
 FLAMBIENT_KEEP_TEMP=false            # Keep temporary files
 FLAMBIENT_PARALLEL_UPLOADS=5         # Concurrent uploads
@@ -385,7 +362,7 @@ FLAMBIENT_PARALLEL_DOWNLOADS=5       # Concurrent downloads
 
 Advanced settings in `config/flambient.php`:
 
-```php
+``` php
 return [
     'imagen' => [
         'api_key' => env('IMAGEN_AI_API_KEY'),
@@ -404,18 +381,19 @@ return [
 ];
 ```
 
----
+------------------------------------------------------------------------
 
 ## 🧪 Testing
 
 ### **Run All Tests**
 
-```bash
+``` bash
 php artisan test
 ```
 
 Expected output:
-```
+
+```         
 PASS  Tests\Unit\ExifServiceTest
 ✓ it extracts exif metadata from images
 ✓ it classifies images using flash strategy
@@ -443,7 +421,7 @@ Duration: 2.34s
 
 ### **Run Specific Test Suites**
 
-```bash
+``` bash
 # EXIF extraction and classification
 php artisan test --filter=ExifServiceTest
 
@@ -461,24 +439,24 @@ php artisan test --filter=FlambientProcessCommandTest
 
 The test suite covers:
 
-- ✅ EXIF extraction (numeric + pretty)
-- ✅ Image classification (6 strategies)
-- ✅ Image grouping by timestamp
-- ✅ ImageMagick script generation
-- ✅ Imagen AI client (all endpoints)
-- ✅ Upload/download with progress
-- ✅ Polling with status tracking
-- ✅ End-to-end workflow command
-- ✅ Error handling and retries
-- ✅ Success rate calculations
+-   ✅ EXIF extraction (numeric + pretty)
+-   ✅ Image classification (6 strategies)
+-   ✅ Image grouping by timestamp
+-   ✅ ImageMagick script generation
+-   ✅ Imagen AI client (all endpoints)
+-   ✅ Upload/download with progress
+-   ✅ Polling with status tracking
+-   ✅ End-to-end workflow command
+-   ✅ Error handling and retries
+-   ✅ Success rate calculations
 
 All external dependencies (exiftool, ImageMagick, Imagen API) are mocked using `Process::fake()` and `Http::fake()`.
 
----
+------------------------------------------------------------------------
 
 ## 📁 Project Structure
 
-```
+```         
 terminal-flazsh/
 ├── app/
 │   ├── Console/Commands/
@@ -535,13 +513,13 @@ terminal-flazsh/
 └── README.md                                # This file
 ```
 
----
+------------------------------------------------------------------------
 
 ## 📚 API Documentation
 
 ### **ExifService**
 
-```php
+``` php
 use App\Services\Flambient\ExifService;
 use App\Enums\ImageClassificationStrategy;
 
@@ -562,7 +540,7 @@ $groups = $service->groupImagesByTimestamp($metadata);
 
 ### **ImageMagickService**
 
-```php
+``` php
 use App\Services\Flambient\ImageMagickService;
 
 $service = new ImageMagickService();
@@ -578,7 +556,7 @@ $result = $service->executeAllScripts($scriptsDirectory);
 
 ### **ImagenClient**
 
-```php
+``` php
 use App\Services\ImagenAI\ImagenClient;
 use App\Services\ImagenAI\ImagenEditOptions;
 use App\Services\ImagenAI\ImagenPhotographyType;
@@ -607,36 +585,28 @@ $exportLinks = $client->getExportLinks($project->uuid);
 $downloadResult = $client->downloadFiles($exportLinks, '/output');
 ```
 
-For complete API reference, see:
-- **[IMAGEN_INTEGRATION.md](./IMAGEN_INTEGRATION.md)** - Imagen AI client guide
-- **[ARCHITECTURE_REDESIGN.md](./ARCHITECTURE_REDESIGN.md)** - Architectural overview
+For complete API reference, see: - [**IMAGEN_INTEGRATION.md**](./IMAGEN_INTEGRATION.md) - Imagen AI client guide - [**ARCHITECTURE_REDESIGN.md**](./ARCHITECTURE_REDESIGN.md) - Architectural overview
 
----
+------------------------------------------------------------------------
 
 ## 🔮 Future Improvements
 
 ### **1. Multiple ImageMagick Processing Scripts**
 
-**Current:** Single flambient blend algorithm
-**Future:** Multiple processing profiles to choose from
+**Current:** Single flambient blend algorithm **Future:** Multiple processing profiles to choose from
 
-```bash
+``` bash
 php artisan flambient:process --profile=hdr-merge
 php artisan flambient:process --profile=window-pull
 php artisan flambient:process --profile=flash-balance
 php artisan flambient:process --profile=custom
 ```
 
-**Potential Profiles:**
-- `flambient` (default) - Standard ambient/flash blend
-- `hdr-merge` - HDR tone mapping with multiple exposures
-- `window-pull` - Specialized window light enhancement
-- `flash-balance` - Auto-balance flash intensity
-- `perspective-fix` - Vertical/horizontal correction
-- `custom` - User-defined .mgk script templates
+**Potential Profiles:** - `flambient` (default) - Standard ambient/flash blend - `hdr-merge` - HDR tone mapping with multiple exposures - `window-pull` - Specialized window light enhancement - `flash-balance` - Auto-balance flash intensity - `perspective-fix` - Vertical/horizontal correction - `custom` - User-defined .mgk script templates
 
 **Implementation Plan:**
-```php
+
+``` php
 // app/Enums/ProcessingProfile.php
 enum ProcessingProfile: string {
     case Flambient = 'flambient';
@@ -656,10 +626,9 @@ class ScriptGenerator {
 
 ### **2. Capture One Integration**
 
-**Current:** Post-processing of existing JPGs
-**Future:** Live ingestion during wireless camera tethering
+**Current:** Post-processing of existing JPGs **Future:** Live ingestion during wireless camera tethering
 
-```bash
+``` bash
 # Watch mode - monitor Capture One output folder
 php artisan flambient:watch \
   --capture-one-session=/path/to/session \
@@ -674,17 +643,11 @@ php artisan flambient:watch \
 ✓ Blended: flambient_01.jpg
 ```
 
-**Features:**
-- **File watcher** - Monitor Capture One Capture folder
-- **Real-time classification** - Instant EXIF analysis on import
-- **Auto-grouping** - Smart pairing based on shoot sequence
-- **Progressive processing** - Process groups as they complete
-- **Live preview** - Optional web server for client viewing
-- **Pause/resume** - Control processing during shoot
-- **Backup strategy** - Copy originals before processing
+**Features:** - **File watcher** - Monitor Capture One Capture folder - **Real-time classification** - Instant EXIF analysis on import - **Auto-grouping** - Smart pairing based on shoot sequence - **Progressive processing** - Process groups as they complete - **Live preview** - Optional web server for client viewing - **Pause/resume** - Control processing during shoot - **Backup strategy** - Copy originals before processing
 
 **Implementation Plan:**
-```php
+
+``` php
 // app/Console/Commands/FlambientWatchCommand.php
 class FlambientWatchCommand extends Command {
     protected $signature = 'flambient:watch
@@ -731,7 +694,8 @@ class SessionParser {
 ```
 
 **Capture One Session Structure:**
-```
+
+```         
 CaptureOneSession/
 ├── Capture/               # New images appear here
 │   ├── IMG_001.jpg
@@ -742,20 +706,15 @@ CaptureOneSession/
 └── Settings/              # Session settings
 ```
 
-**Benefits:**
-- ✅ Faster turnaround - Process during shoot, not after
-- ✅ Immediate feedback - See blended results in real-time
-- ✅ Client preview - Show progress to clients on-site
-- ✅ Reduce post-processing - Images ready when shoot ends
-- ✅ Better organization - Auto-naming and grouping
+**Benefits:** - ✅ Faster turnaround - Process during shoot, not after - ✅ Immediate feedback - See blended results in real-time - ✅ Client preview - Show progress to clients on-site - ✅ Reduce post-processing - Images ready when shoot ends - ✅ Better organization - Auto-naming and grouping
 
----
+------------------------------------------------------------------------
 
 ## 🤝 Contributing
 
 ### **Development Workflow**
 
-```bash
+``` bash
 # 1. Create feature branch
 git checkout -b feature/my-feature
 
@@ -779,48 +738,44 @@ git push origin feature/my-feature
 
 ### **Code Standards**
 
-- **PSR-12** coding style (enforced by Laravel Pint)
-- **Type safety** - Use type hints, return types, readonly classes
-- **Test coverage** - Add tests for all new features
-- **Documentation** - Update README and inline docs
-- **Laravel conventions** - Follow Laravel best practices
+-   **PSR-12** coding style (enforced by Laravel Pint)
+-   **Type safety** - Use type hints, return types, readonly classes
+-   **Test coverage** - Add tests for all new features
+-   **Documentation** - Update README and inline docs
+-   **Laravel conventions** - Follow Laravel best practices
 
 ### **Testing Requirements**
 
-All new features must include:
-- ✅ Unit tests for services/classes
-- ✅ Feature tests for commands
-- ✅ Mock external dependencies (Http::fake(), Process::fake())
-- ✅ Assertions for success and failure cases
+All new features must include: - ✅ Unit tests for services/classes - ✅ Feature tests for commands - ✅ Mock external dependencies (Http::fake(), Process::fake()) - ✅ Assertions for success and failure cases
 
----
+------------------------------------------------------------------------
 
 ## 📝 License
 
 MIT License - see [LICENSE](LICENSE) for details
 
----
+------------------------------------------------------------------------
 
 ## 🙏 Acknowledgments
 
-- **[Laravel Framework](https://laravel.com)** - Elegant PHP framework
-- **[Laravel Prompts](https://laravel.com/docs/prompts)** - Beautiful CLI interactions
-- **[ImageMagick](https://imagemagick.org)** - Image processing powerhouse
-- **[Imagen AI](https://imagen-ai.com)** - Cloud-based photo enhancement
-- **[ExifTool](https://exiftool.org)** - Comprehensive EXIF metadata extraction
+-   [**Laravel Framework**](https://laravel.com) - Elegant PHP framework
+-   [**Laravel Prompts**](https://laravel.com/docs/prompts) - Beautiful CLI interactions
+-   [**ImageMagick**](https://imagemagick.org) - Image processing powerhouse
+-   [**Imagen AI**](https://imagen-ai.com) - Cloud-based photo enhancement
+-   [**ExifTool**](https://exiftool.org) - Comprehensive EXIF metadata extraction
 
----
+------------------------------------------------------------------------
 
 ## 📞 Support
 
 For issues, questions, or feature requests:
 
-- **GitHub Issues**: [Create an issue](https://github.com/yourusername/terminal-flazsh/issues)
-- **Documentation**: See `/docs` folder for detailed guides
-- **Architecture**: Read [ARCHITECTURE_REDESIGN.md](./ARCHITECTURE_REDESIGN.md)
-- **Imagen Integration**: Read [IMAGEN_INTEGRATION.md](./IMAGEN_INTEGRATION.md)
+-   **GitHub Issues**: [Create an issue](https://github.com/yourusername/terminal-flazsh/issues)
+-   **Documentation**: See `/docs` folder for detailed guides
+-   **Architecture**: Read [ARCHITECTURE_REDESIGN.md](./ARCHITECTURE_REDESIGN.md)
+-   **Imagen Integration**: Read [IMAGEN_INTEGRATION.md](./IMAGEN_INTEGRATION.md)
 
----
+------------------------------------------------------------------------
 
 **Built with ❤️ using Laravel 11, PHP 8.2, and modern development practices**
 
