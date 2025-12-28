@@ -148,26 +148,23 @@ class ImagenClient
         }
 
         try {
-            // Simple PUT request to S3 presigned URL (matches curl -T from shell script)
-            // S3 expects raw file content in the body, not multipart/form-data
-            $fileHandle = fopen($localFilePath, 'r');
-            if ($fileHandle === false) {
-                throw new ImagenException("Could not open file: {$localFilePath}");
-            }
+            // Match Python SDK: raw binary upload with NO Content-Type header
+            // S3 presigned URLs include all necessary headers in the signed URL
+            $fileContent = File::get($localFilePath);
 
             $response = Http::withoutVerifying()  // S3 presigned URLs may have cert issues
                 ->timeout(300)  // 5 minute timeout for large files
-                ->withBody(stream_get_contents($fileHandle), mime_content_type($localFilePath))
+                ->withHeaders([])  // Explicitly no headers - S3 presigned URL has them
+                ->withBody($fileContent)  // Raw binary content
                 ->put($uploadLink->uploadUrl);
-
-            fclose($fileHandle);
 
             if (!$response->successful()) {
                 $errorBody = $response->body();
                 Log::error("Upload failed for {$uploadLink->filename}", [
                     'status' => $response->status(),
                     'body' => $errorBody,
-                    'file_size' => filesize($localFilePath),
+                    'file_size' => strlen($fileContent),
+                    'url_host' => parse_url($uploadLink->uploadUrl, PHP_URL_HOST),
                 ]);
 
                 throw new ImagenException(
@@ -507,6 +504,61 @@ class ImagenClient
             succeeded: $succeeded,
             failed: $failed
         );
+    }
+
+    /**
+     * Verify that uploaded files are accessible in the project.
+     *
+     * This helps catch upload failures early before starting the editing workflow,
+     * preventing the "No images were uploaded for this project" error.
+     *
+     * @param string $projectUuid
+     * @param array<string> $expectedFilenames List of filenames that should be uploaded
+     * @return bool True if verification passes
+     * @throws ImagenException
+     */
+    public function verifyUploadsReady(string $projectUuid, array $expectedFilenames): bool
+    {
+        // Give S3 a moment to confirm all uploads
+        sleep(2);
+
+        try {
+            // Try to request upload links again - this validates the files exist in the project
+            $filesList = array_map(fn($name) => ['file_name' => $name], $expectedFilenames);
+
+            $response = $this->http->post(
+                "{$this->baseUrl}/projects/{$projectUuid}/get_temporary_upload_links",
+                ['files_list' => $filesList]
+            );
+
+            if (!$response->successful()) {
+                Log::warning("Upload verification failed", [
+                    'project' => $projectUuid,
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                    'expected_files' => count($expectedFilenames),
+                ]);
+                return false;
+            }
+
+            $files = $response->json('data.files_list', []);
+
+            if (count($files) !== count($expectedFilenames)) {
+                Log::warning("Upload count mismatch", [
+                    'expected' => count($expectedFilenames),
+                    'received' => count($files),
+                ]);
+                return false;
+            }
+
+            return true;
+        } catch (\Exception $e) {
+            Log::error("Upload verification exception", [
+                'error' => $e->getMessage(),
+                'project' => $projectUuid,
+            ]);
+            return false;
+        }
     }
 
     /**

@@ -455,6 +455,28 @@ class FlambientProcessCommand extends Command
                 }
                 // else: upload-only mode already set $blendedImages from input directory
 
+                // Validate all files exist before attempting upload
+                $missingFiles = array_filter($blendedImages, fn($path) => !File::exists($path));
+
+                if (!empty($missingFiles)) {
+                    warning("⚠ ERROR: " . count($missingFiles) . " files not found!");
+                    $this->table(
+                        ['Missing Files'],
+                        array_map(fn($f) => [basename($f)], array_slice($missingFiles, 0, 10))
+                    );
+
+                    if (count($missingFiles) > 10) {
+                        note("... and " . (count($missingFiles) - 10) . " more missing files");
+                    }
+
+                    if (!confirm('Continue with remaining files?', default: false)) {
+                        return self::FAILURE;
+                    }
+
+                    // Filter to only existing files
+                    $blendedImages = array_filter($blendedImages, fn($path) => File::exists($path));
+                }
+
                 info("Uploading " . count($blendedImages) . " images to Imagen AI...");
 
                 // Upload images with progress tracking
@@ -476,6 +498,32 @@ class FlambientProcessCommand extends Command
                 }
 
                 note("✓ Upload complete: {$uploadedCount}/{$uploadResult->totalFiles} files ({$uploadResult->getSuccessRate()}% success)");
+                $this->newLine();
+
+                // Verify uploads reached Imagen AI (prevents "No images uploaded" error)
+                info("Verifying uploads with Imagen AI...");
+                $filenames = array_map('basename', $blendedImages);
+                $isVerified = spin(
+                    callback: fn() => $imagenClient->verifyUploadsReady($imagenProject->uuid, $filenames),
+                    message: 'Checking that files are accessible...'
+                );
+
+                if (!$isVerified) {
+                    warning("⚠ Upload verification failed - files may not be accessible to Imagen AI");
+                    warning("This usually means the upload didn't complete successfully.");
+
+                    if (!confirm('Try to proceed with editing anyway? (may fail)', default: false)) {
+                        $this->newLine();
+                        note("Upload failed. Possible causes:");
+                        note("  • Files were moved/deleted during upload");
+                        note("  • Network connection interrupted");
+                        note("  • S3 upload timeout");
+                        return self::FAILURE;
+                    }
+                } else {
+                    note("✓ Upload verified - all files accessible to Imagen AI");
+                }
+
                 $this->newLine();
 
                 // ═══════════════════════════════════════════════════════
