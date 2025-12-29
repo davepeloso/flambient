@@ -478,19 +478,31 @@ class FlambientProcessCommand extends Command
                 }
 
                 info("Uploading " . count($blendedImages) . " images to Imagen AI...");
+                $this->newLine();
+
+                // Create progress bar for uploads
+                $uploadProgress = progress(
+                    label: 'Uploading images',
+                    steps: count($blendedImages),
+                    hint: 'Uploading to S3 via presigned URLs...'
+                );
+                $uploadProgress->start();
 
                 // Upload images with progress tracking
                 $uploadedCount = 0;
                 $uploadResult = $imagenClient->uploadImages(
                     projectUuid: $imagenProject->uuid,
                     filePaths: $blendedImages,
-                    progressCallback: function ($current, $total, $filename) use (&$uploadedCount) {
+                    progressCallback: function ($current, $total, $filename) use (&$uploadedCount, $uploadProgress) {
                         $uploadedCount = $current;
-                        if ($current % 5 === 0 || $current === $total) {
-                            $this->components->info("  Uploaded {$current}/{$total}: " . basename($filename));
-                        }
+                        $uploadProgress->advance();
+                        $uploadProgress->label("Uploading images");
+                        $uploadProgress->hint("{$current}/{$total} - " . basename($filename));
                     }
                 );
+
+                $uploadProgress->finish();
+                $this->newLine();
 
                 if (!$uploadResult->isFullySuccessful()) {
                     $failedCount = count($uploadResult->failed);
@@ -536,16 +548,10 @@ class FlambientProcessCommand extends Command
 
                 // Select editing profile
                 $profileKey = $this->selectImagenProfile();
-                $this->newLine();
 
-                // Get edit options
-                $editOptions = new ImagenEditOptions(
-                    crop: false,
-                    windowPull: true,
-                    perspectiveCorrection: false,
-                    hdrMerge: false,
-                    photographyType: ImagenPhotographyType::REAL_ESTATE
-                );
+                // Select edit parameters preset
+                $editOptions = $this->selectEditPreset();
+                $this->newLine();
 
                 spin(
                     callback: fn() => $imagenClient->startEditing(
@@ -568,27 +574,37 @@ class FlambientProcessCommand extends Command
                 note('Progress updates will appear below. You can safely cancel (Ctrl+C) and resume later.');
                 $this->newLine();
 
+                // Create progress bar (100 steps for percentage)
+                $progressBar = progress(
+                    label: 'AI editing in progress',
+                    steps: 100,
+                    hint: 'Checking status every 30 seconds...'
+                );
+                $progressBar->start();
+
                 $lastProgress = -1;
                 $editStatus = $imagenClient->pollEditStatus(
                     projectUuid: $imagenProject->uuid,
                     maxAttempts: config('flambient.imagen.poll_max_attempts', 240),
                     intervalSeconds: config('flambient.imagen.poll_interval', 30),
-                    progressCallback: function ($status) use (&$lastProgress) {
-                        if ($status->progress !== $lastProgress) {
-                            $emoji = match(true) {
-                                $status->progress === 100 => '🎉',
-                                $status->progress >= 75 => '🚀',
-                                $status->progress >= 50 => '⚡',
-                                $status->progress >= 25 => '🔄',
-                                default => '⏳'
-                            };
+                    progressCallback: function ($status) use (&$lastProgress, $progressBar) {
+                        if ($status->progress !== $lastProgress && $status->progress > $lastProgress) {
+                            // Advance progress bar to current percentage
+                            $stepsToAdvance = $status->progress - $lastProgress;
+                            for ($i = 0; $i < $stepsToAdvance; $i++) {
+                                $progressBar->advance();
+                            }
 
-                            $this->components->info("{$emoji} Processing: {$status->progress}% - {$status->status}");
+                            // Update label with status
+                            $progressBar->label("AI editing - {$status->status}");
+                            $progressBar->hint("{$status->progress}% complete");
+
                             $lastProgress = $status->progress;
                         }
                     }
                 );
 
+                $progressBar->finish();
                 note("✓ AI editing complete!");
                 $this->newLine();
 
@@ -622,23 +638,35 @@ class FlambientProcessCommand extends Command
                 );
 
                 note("✓ Found {$exportLinks->count()} files ready for download");
+                $this->newLine();
 
                 // Create output directory for edited images
                 $editedOutputDir = "{$config->outputDirectory}/edited";
                 File::ensureDirectoryExists($editedOutputDir);
+
+                // Create progress bar for downloads
+                $downloadProgress = progress(
+                    label: 'Downloading enhanced images',
+                    steps: $exportLinks->count(),
+                    hint: 'Downloading edited files from Imagen AI...'
+                );
+                $downloadProgress->start();
 
                 // Download files with progress
                 $downloadedCount = 0;
                 $downloadResult = $imagenClient->downloadFiles(
                     downloadLinks: $exportLinks,
                     outputDirectory: $editedOutputDir,
-                    progressCallback: function ($current, $total, $filename) use (&$downloadedCount) {
+                    progressCallback: function ($current, $total, $filename) use (&$downloadedCount, $downloadProgress) {
                         $downloadedCount = $current;
-                        if ($current % 5 === 0 || $current === $total) {
-                            $this->components->info("  Downloaded {$current}/{$total}: " . basename($filename));
-                        }
+                        $downloadProgress->advance();
+                        $downloadProgress->label("Downloading enhanced images");
+                        $downloadProgress->hint("{$current}/{$total} - " . basename($filename));
                     }
                 );
+
+                $downloadProgress->finish();
+                $this->newLine();
 
                 if (!$downloadResult->isFullySuccessful()) {
                     $failedCount = count($downloadResult->failed);
@@ -827,6 +855,92 @@ class FlambientProcessCommand extends Command
         }
 
         return (string)$selectedKey;
+    }
+
+    /**
+     * Prompt user to select edit parameter preset.
+     * Returns ImagenEditOptions configured from the selected preset.
+     */
+    private function selectEditPreset(): ImagenEditOptions
+    {
+        $this->newLine();
+        info('Select Edit Parameters');
+        note('Choose a preset that matches your workflow and desired output');
+
+        // Get presets from config
+        $presets = config('imagen-edit-presets.presets', []);
+        $categories = config('imagen-edit-presets.categories', []);
+        $default = config('imagen-edit-presets.default', 'flambient_real_estate');
+
+        if (empty($presets)) {
+            warning("No edit presets configured");
+            note("Using default flambient settings");
+            return new ImagenEditOptions(
+                windowPull: true,
+                photographyType: ImagenPhotographyType::REAL_ESTATE
+            );
+        }
+
+        // Ask which category to browse
+        $categoryOptions = [];
+        foreach ($categories as $categoryKey => $category) {
+            $categoryLabel = $category['label'] ?? ucfirst($categoryKey);
+            $presetCount = count($category['presets'] ?? []);
+            $categoryOptions[$categoryKey] = "{$categoryLabel} ({$presetCount} presets)";
+        }
+        $categoryOptions['default'] = "✓ Use Default ({$default})";
+
+        $categoryChoice = select(
+            label: 'Which category?',
+            options: $categoryOptions,
+            default: 'real_estate',
+            hint: 'Select the photography type that matches your workflow'
+        );
+
+        // Use default
+        if ($categoryChoice === 'default') {
+            $selectedPresetKey = $default;
+            $selectedPreset = $presets[$selectedPresetKey] ?? null;
+
+            if ($selectedPreset) {
+                note("Using default preset: {$selectedPreset['name']}");
+                return ImagenEditOptions::fromPreset($selectedPreset);
+            }
+        } else {
+            // Get presets for selected category
+            $categoryPresets = $categories[$categoryChoice]['presets'] ?? [];
+
+            if (empty($categoryPresets)) {
+                warning("No presets in this category");
+                note("Using default settings");
+                return new ImagenEditOptions(
+                    windowPull: true,
+                    photographyType: ImagenPhotographyType::REAL_ESTATE
+                );
+            }
+
+            // Build options for selection
+            $presetOptions = [];
+            foreach ($categoryPresets as $presetKey) {
+                if (isset($presets[$presetKey])) {
+                    $preset = $presets[$presetKey];
+                    $presetOptions[$presetKey] = $preset['name'] . "\n   " . ($preset['description'] ?? '');
+                }
+            }
+
+            // Let user select preset
+            $selectedPresetKey = select(
+                label: 'Choose your edit preset',
+                options: $presetOptions,
+                scroll: 8,
+                hint: 'Each preset has different editing options enabled'
+            );
+
+            $selectedPreset = $presets[$selectedPresetKey];
+            note("✓ Selected: {$selectedPreset['name']}");
+        }
+
+        return ImagenEditOptions::fromPreset($selectedPreset);
     }
 
     /**

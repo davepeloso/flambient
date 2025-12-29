@@ -169,11 +169,50 @@ readonly class ImagenEditOptions
 {
     public function __construct(
         public bool $crop = false,
-        public bool $windowPull = true,
-        public bool $perspectiveCorrection = false,
+        public bool $portraitCrop = false,
+        public bool $headshotCrop = false,
+        public string|bool $cropAspectRatio = false,
         public bool $hdrMerge = false,
+        public bool $straighten = false,
+        public bool $subjectMask = false,
         public ?ImagenPhotographyType $photographyType = null,
+        public ?string $callbackUrl = null,
+        public bool $smoothSkin = false,
+        public bool $perspectiveCorrection = false,
+        public bool $windowPull = true,
+        public bool $skyReplacement = false,
+        public ?int $skyReplacementTemplateId = null,
+        public string $hdrOutputCompression = 'LOSSY', // LOSSY or LOSSLESS
     ) {}
+
+    /**
+     * Create from config preset array
+     */
+    public static function fromPreset(array $preset): self
+    {
+        // Map photography_type string to enum
+        $photographyType = isset($preset['photography_type'])
+            ? ImagenPhotographyType::tryFrom($preset['photography_type'])
+            : null;
+
+        return new self(
+            crop: $preset['crop'] ?? false,
+            portraitCrop: $preset['portrait_crop'] ?? false,
+            headshotCrop: $preset['headshot_crop'] ?? false,
+            cropAspectRatio: $preset['crop_aspect_ratio'] ?? false,
+            hdrMerge: $preset['hdr_merge'] ?? false,
+            straighten: $preset['straighten'] ?? false,
+            subjectMask: $preset['subject_mask'] ?? false,
+            photographyType: $photographyType,
+            callbackUrl: $preset['callback_url'] ?? null,
+            smoothSkin: $preset['smooth_skin'] ?? false,
+            perspectiveCorrection: $preset['perspective_correction'] ?? false,
+            windowPull: $preset['window_pull'] ?? true,
+            skyReplacement: $preset['sky_replacement'] ?? false,
+            skyReplacementTemplateId: $preset['sky_replacement_template_id'] ?? null,
+            hdrOutputCompression: $preset['hdr_output_compression'] ?? 'LOSSY',
+        );
+    }
 }
 
 /**

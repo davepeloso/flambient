@@ -271,13 +271,35 @@ class ImagenClient
         $options = $options ?? new ImagenEditOptions();
 
         $payload = [
-            'profile_key' => (string)$profileKey,
+            'profile_key' => (int)$profileKey,
             'crop' => $options->crop,
-            'window_pull' => $options->windowPull,
-            'perspective_correction' => $options->perspectiveCorrection,
+            'portrait_crop' => $options->portraitCrop,
+            'headshot_crop' => $options->headshotCrop,
+            'crop_aspect_ratio' => $options->cropAspectRatio,
             'hdr_merge' => $options->hdrMerge,
+            'straighten' => $options->straighten,
+            'subject_mask' => $options->subjectMask,
             'photography_type' => $options->photographyType?->value,
+            'smooth_skin' => $options->smoothSkin,
+            'perspective_correction' => $options->perspectiveCorrection,
+            'window_pull' => $options->windowPull,
+            'sky_replacement' => $options->skyReplacement,
+            'hdr_output_compression' => $options->hdrOutputCompression,
         ];
+
+        // Optional parameters (only include if not null)
+        if ($options->callbackUrl !== null) {
+            $payload['callback_url'] = $options->callbackUrl;
+        }
+        if ($options->skyReplacementTemplateId !== null) {
+            $payload['sky_replacement_template_id'] = $options->skyReplacementTemplateId;
+        }
+
+        Log::info("Sending edit request to Imagen AI", [
+            'project' => $projectUuid,
+            'profile_key' => $profileKey,
+            'options' => $payload,
+        ]);
 
         $response = $this->http->post(
             "{$this->baseUrl}/projects/{$projectUuid}/edit",
@@ -285,16 +307,29 @@ class ImagenClient
         );
 
         if (!$response->successful()) {
+            Log::error("Failed to start editing", [
+                'project' => $projectUuid,
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+
             throw new ImagenException(
                 "Failed to start editing: {$response->body()}",
                 $response->status()
             );
         }
 
+        $message = $response->json('data.message', $response->json('message', 'Project submitted for editing'));
+
+        Log::info("Edit request successful", [
+            'project' => $projectUuid,
+            'message' => $message,
+        ]);
+
         return new ImagenEditResponse(
             projectUuid: $projectUuid,
             status: 'submitted',
-            message: $response->json('message', 'Project submitted for editing')
+            message: $message
         );
     }
 
