@@ -16,3 +16,12 @@ Homestead.yaml
 Homestead.json
 /.vagrant
 .phpunit.result.cache
+
+# Flambient specific
+storage/flambient
+public/123-main-street
+public/123-main-street/*.jpg
+public/123-main-street/*.jpeg
+public/
+public
+public/*
