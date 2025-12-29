@@ -352,13 +352,14 @@ class ImagenClient
         }
 
         $data = $response->json('data', []);
+        $statusLower = strtolower($data['status'] ?? '');
 
         return new ImagenEditStatus(
             status: $data['status'] ?? 'unknown',
             progress: $data['progress'] ?? 0,
             message: $data['message'] ?? null,
-            isComplete: in_array($data['status'] ?? '', ['completed', 'done', 'finished']),
-            isFailed: in_array($data['status'] ?? '', ['failed', 'error'])
+            isComplete: in_array($statusLower, ['completed', 'done', 'finished']),
+            isFailed: in_array($statusLower, ['failed', 'error'])
         );
     }
 
@@ -455,6 +456,76 @@ class ImagenClient
     }
 
     /**
+     * Check export status for a project.
+     *
+     * @param string $projectUuid
+     * @return ImagenEditStatus
+     * @throws ImagenException
+     */
+    public function getExportStatus(string $projectUuid): ImagenEditStatus
+    {
+        $response = $this->http->get("{$this->baseUrl}/projects/{$projectUuid}/export/status");
+
+        if (!$response->successful()) {
+            throw new ImagenException(
+                "Failed to get export status: {$response->body()}",
+                $response->status()
+            );
+        }
+
+        $data = $response->json('data', []);
+        $statusLower = strtolower($data['status'] ?? '');
+
+        return new ImagenEditStatus(
+            status: $data['status'] ?? 'unknown',
+            progress: $data['progress'] ?? 0,
+            message: $data['message'] ?? null,
+            isComplete: in_array($statusLower, ['completed', 'done', 'finished']),
+            isFailed: in_array($statusLower, ['failed', 'error'])
+        );
+    }
+
+    /**
+     * Poll export status until complete or timeout.
+     *
+     * @param string $projectUuid
+     * @param int $maxAttempts
+     * @param int $intervalSeconds
+     * @param callable|null $progressCallback function(ImagenEditStatus $status): void
+     * @return ImagenEditStatus
+     * @throws ImagenException
+     */
+    public function pollExportStatus(
+        string $projectUuid,
+        int $maxAttempts = 120, // 1 hour at 30s intervals (exports are usually faster than edits)
+        int $intervalSeconds = 30,
+        ?callable $progressCallback = null
+    ): ImagenEditStatus {
+        $attempts = 0;
+
+        while ($attempts < $maxAttempts) {
+            $status = $this->getExportStatus($projectUuid);
+
+            if ($progressCallback) {
+                $progressCallback($status);
+            }
+
+            if ($status->isComplete) {
+                return $status;
+            }
+
+            if ($status->isFailed) {
+                throw new ImagenException("Export failed: {$status->message}");
+            }
+
+            sleep($intervalSeconds);
+            $attempts++;
+        }
+
+        throw new ImagenException("Export polling timeout after {$maxAttempts} attempts");
+    }
+
+    /**
      * Get export download links (JPEG files).
      *
      * @param string $projectUuid
@@ -463,7 +534,7 @@ class ImagenClient
      */
     public function getExportLinks(string $projectUuid): Collection
     {
-        $response = $this->http->get("{$this->baseUrl}/projects/{$projectUuid}/export/download");
+        $response = $this->http->get("{$this->baseUrl}/projects/{$projectUuid}/export/get_temporary_download_links");
 
         if (!$response->successful()) {
             throw new ImagenException(
@@ -620,8 +691,8 @@ class ImagenClient
         // Export to JPEG
         $this->exportProject($project->uuid);
 
-        // Wait for export to complete (poll again)
-        sleep(10); // Give export a head start
+        // Wait for export to complete
+        $exportStatus = $this->pollExportStatus($project->uuid, progressCallback: $progressCallback);
 
         // Get download links and download
         $downloadLinks = $this->getExportLinks($project->uuid);

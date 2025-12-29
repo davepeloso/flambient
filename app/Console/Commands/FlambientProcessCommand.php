@@ -616,14 +616,44 @@ class FlambientProcessCommand extends Command
                 info('Step 7/8: Exporting to JPEG format');
 
                 spin(
-                    callback: function () use ($imagenClient, $imagenProject) {
-                        $imagenClient->exportProject($imagenProject->uuid);
-                        sleep(10); // Give export time to initialize
-                    },
+                    callback: fn() => $imagenClient->exportProject($imagenProject->uuid),
                     message: 'Initiating JPEG export...'
                 );
 
                 note("✓ Export initiated");
+                note('Waiting for export to complete (typically 1-5 minutes)...');
+                $this->newLine();
+
+                // Poll for export completion
+                $exportProgress = progress(
+                    label: 'Export in progress',
+                    steps: 100,
+                    hint: 'Checking status every 30 seconds...'
+                );
+                $exportProgress->start();
+
+                $lastExportProgress = -1;
+                $exportStatus = $imagenClient->pollExportStatus(
+                    projectUuid: $imagenProject->uuid,
+                    maxAttempts: config('flambient.imagen.poll_max_attempts', 120),
+                    intervalSeconds: config('flambient.imagen.poll_interval', 30),
+                    progressCallback: function ($status) use (&$lastExportProgress, $exportProgress) {
+                        if ($status->progress !== $lastExportProgress && $status->progress > $lastExportProgress) {
+                            $stepsToAdvance = $status->progress - $lastExportProgress;
+                            for ($i = 0; $i < $stepsToAdvance; $i++) {
+                                $exportProgress->advance();
+                            }
+
+                            $exportProgress->label("Export - {$status->status}");
+                            $exportProgress->hint("{$status->progress}% complete");
+
+                            $lastExportProgress = $status->progress;
+                        }
+                    }
+                );
+
+                $exportProgress->finish();
+                note("✓ Export complete!");
                 $this->newLine();
 
                 // ═══════════════════════════════════════════════════════

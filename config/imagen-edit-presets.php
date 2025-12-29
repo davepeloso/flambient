@@ -107,7 +107,7 @@ return [
             'perspective_correction' => true,
             'straighten' => true,
             'crop' => true,
-            'crop_aspect_ratio' => 'false', // false = no specific ratio
+            'crop_aspect_ratio' => null, // null = no specific ratio
             'hdr_merge' => false,
             'sky_replacement' => false,
             'hdr_output_compression' => 'LOSSY',
@@ -189,7 +189,7 @@ return [
             'perspective_correction' => true,
             'straighten' => true,
             'crop' => true,
-            'crop_aspect_ratio' => 'false',
+            'crop_aspect_ratio' => null,
             'hdr_merge' => false,
             'sky_replacement' => false,
             'hdr_output_compression' => 'LOSSLESS',
