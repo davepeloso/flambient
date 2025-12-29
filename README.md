@@ -53,15 +53,35 @@ A **production-ready Laravel 11 CLI application** for automated flambient photog
 
 ## 🏗️ Architecture
 
-This application represents a **complete architectural redesign** from fragile shell scripts to a robust, Laravel-native system.
+This application represents a **complete architectural redesign** from fragile shell scripts to a robust, Laravel-native system with a **plugin-based architecture** for image processing techniques.
 
 ### **Key Design Principles**
 
-1.  **Explicit State Management** - All workflow state persisted to SQLite
-2.  **Type Safety** - Enums, DTOs, readonly classes throughout
-3.  **Separation of Concerns** - Services for EXIF, ImageMagick, Imagen AI
-4.  **Laravel-Native** - HTTP client, Prompts, Collections, Eloquent
-5.  **Testability** - All external dependencies mockable
+1.  **Plugin Architecture** - Modular script generators for different processing techniques
+2.  **Explicit State Management** - All workflow state persisted to SQLite
+3.  **Type Safety** - Enums, DTOs, readonly classes throughout
+4.  **Separation of Concerns** - Services for EXIF, ImageMagick, Imagen AI
+5.  **Laravel-Native** - HTTP client, Prompts, Collections, Eloquent
+6.  **Testability** - All external dependencies mockable
+
+### **Plugin-Based Processing**
+
+The application uses a **ScriptGeneratorInterface** pattern allowing multiple image processing techniques:
+
+```text
+FlambientProcessCommand
+    ↓
+ScriptGeneratorRegistry → [FlambientGenerator, HDRGenerator, DMECGenerator, ...]
+    ↓
+ImageMagickService (generic executor)
+```
+
+**Benefits:**
+
+- ✅ Add new processing techniques without modifying core code
+- ✅ Each technique is self-contained with its own configuration
+- ✅ Easy to test individual generators independently
+- ✅ Future-proof for new ImageMagick workflows
 
 ### **Workflow Steps**
 
@@ -477,10 +497,21 @@ terminal-flazsh/
 │   │   ├── WorkflowStep.php                  # Individual step tracking
 │   │   └── WorkflowFile.php                  # Processed file tracking
 │   │
+│   ├── Providers/
+│   │   └── ImageProcessorServiceProvider.php # Register script generators
+│   │
 │   ├── Services/
-│   │   ├── Flambient/
+│   │   ├── ImageProcessor/                   # NEW: Plugin-based architecture
+│   │   │   ├── Contracts/
+│   │   │   │   └── ScriptGeneratorInterface.php  # Generator contract
+│   │   │   ├── Generators/
+│   │   │   │   ├── FlambientGenerator.php    # Flambient technique
+│   │   │   │   ├── HDRMergeGenerator.php     # HDR (future)
+│   │   │   │   ├── FocusStackGenerator.php   # Focus stacking (future)
+│   │   │   │   └── DMECGenerator.php         # D-MEC technique (future)
 │   │   │   ├── ExifService.php               # EXIF extraction & classification
-│   │   │   └── ImageMagickService.php        # .mgk script generation
+│   │   │   ├── ImageMagickService.php        # Generic script executor
+│   │   │   └── ScriptGeneratorRegistry.php   # Generator management
 │   │   │
 │   │   └── ImagenAI/
 │   │       ├── ImagenClient.php              # Complete API client
@@ -517,10 +548,85 @@ terminal-flazsh/
 
 ## 📚 API Documentation
 
+### **Plugin Architecture**
+
+#### **Creating a New Generator**
+
+To add a new image processing technique, implement `ScriptGeneratorInterface`:
+
+```php
+use App\Services\ImageProcessor\Contracts\ScriptGeneratorInterface;
+
+class MyCustomGenerator implements ScriptGeneratorInterface
+{
+    public function getKey(): string
+    {
+        return 'my-custom'; // Unique identifier
+    }
+
+    public function getName(): string
+    {
+        return 'My Custom Technique';
+    }
+
+    public function getDescription(): string
+    {
+        return 'Description of what this technique does';
+    }
+
+    public function getClassificationStrategy(): ?string
+    {
+        return 'flash'; // or 'exposure_program', 'custom', null
+    }
+
+    public function getConfigurationSchema(): array
+    {
+        return [
+            'parameter_one' => [
+                'type' => 'text',
+                'label' => 'Parameter One',
+                'default' => '100%',
+                'description' => 'What this parameter controls',
+            ],
+        ];
+    }
+
+    public function generateScript(
+        array $images,
+        array $config,
+        string $outputPath
+    ): string {
+        // Build your ImageMagick script here
+        $script = [];
+        $script[] = "# My Custom Processing";
+        $script[] = "( " . implode(" ", $images['ambient']) . " )";
+        $script[] = "-write \"{$outputPath}\"";
+
+        return implode("\n", $script);
+    }
+}
+```
+
+Then register it in `ImageProcessorServiceProvider`:
+
+```php
+public function register(): void
+{
+    $this->app->singleton(ScriptGeneratorRegistry::class, function () {
+        $registry = new ScriptGeneratorRegistry();
+
+        $registry->register(new FlambientGenerator());
+        $registry->register(new MyCustomGenerator()); // Add your generator
+
+        return $registry;
+    });
+}
+```
+
 ### **ExifService**
 
-``` php
-use App\Services\Flambient\ExifService;
+```php
+use App\Services\ImageProcessor\ExifService;
 use App\Enums\ImageClassificationStrategy;
 
 $service = new ExifService(
@@ -534,24 +640,35 @@ $metadata = $service->extractMetadata('/path/to/images');
 // Get sample values for user preview
 $samples = $service->getSampleExifValues('/path/to/images', count: 10);
 
-// Group images by timestamp
-$groups = $service->groupImagesByTimestamp($metadata);
+// Group images by ambient/flash sequences
+$groups = $service->groupImages($metadata);
 ```
 
 ### **ImageMagickService**
 
-``` php
-use App\Services\Flambient\ImageMagickService;
+```php
+use App\Services\ImageProcessor\ImageMagickService;
+use App\Services\ImageProcessor\ScriptGeneratorRegistry;
 
-$service = new ImageMagickService();
+$service = new ImageMagickService(binary: 'magick');
+$registry = app(ScriptGeneratorRegistry::class);
+
+// Get a generator
+$generator = $registry->get('flambient');
 
 // Generate .mgk scripts for all groups
-$result = $service->generateScripts($groups, $config);
-// Returns: ['scripts' => [...], 'master_script' => '...']
+$scripts = $service->generateScripts(
+    generator: $generator,
+    groups: $groups,
+    config: ['level_low' => '40%', 'level_high' => '140%'],
+    imageDirectory: '/path/to/images',
+    scriptsDirectory: '/path/to/scripts',
+    outputDirectory: '/path/to/output'
+);
 
 // Execute all scripts
-$result = $service->executeAllScripts($scriptsDirectory);
-// Returns: ['success' => true, 'output' => '...']
+$result = $service->executeAllScripts('/path/to/scripts');
+// Returns: ['success' => true, 'output' => '...', 'error' => '...']
 ```
 
 ### **ImagenClient**
@@ -591,37 +708,41 @@ For complete API reference, see: - [**IMAGEN_INTEGRATION.md**](./IMAGEN_INTEGRAT
 
 ## 🔮 Future Improvements
 
-### **1. Multiple ImageMagick Processing Scripts**
+### **1. Additional Image Processing Generators** ✅ Architecture Complete
 
-**Current:** Single flambient blend algorithm **Future:** Multiple processing profiles to choose from
+**Current:** Plugin architecture implemented with Flambient generator
+**Status:** ✅ **Ready to add new generators** - infrastructure complete!
 
-``` bash
-php artisan flambient:process --profile=hdr-merge
-php artisan flambient:process --profile=window-pull
-php artisan flambient:process --profile=flash-balance
-php artisan flambient:process --profile=custom
-```
+The plugin architecture is now live! Adding new processing techniques is as simple as:
 
-**Potential Profiles:** - `flambient` (default) - Standard ambient/flash blend - `hdr-merge` - HDR tone mapping with multiple exposures - `window-pull` - Specialized window light enhancement - `flash-balance` - Auto-balance flash intensity - `perspective-fix` - Vertical/horizontal correction - `custom` - User-defined .mgk script templates
+1. Create a new class implementing `ScriptGeneratorInterface`
+2. Register it in `ImageProcessorServiceProvider`
+3. No core code changes needed!
 
-**Implementation Plan:**
+**Potential Generators to Add:**
 
-``` php
-// app/Enums/ProcessingProfile.php
-enum ProcessingProfile: string {
-    case Flambient = 'flambient';
-    case HdrMerge = 'hdr-merge';
-    case WindowPull = 'window-pull';
-    case FlashBalance = 'flash-balance';
+- `HDRMergeGenerator` - HDR tone mapping with multiple exposures
+- `DMECGenerator` - Dissimilar Multiple Exposure Composition (cherry-pick attributes)
+- `WindowPullGenerator` - Specialized window light enhancement
+- `FocusStackGenerator` - Focus stacking for deep depth of field
+- `PerspectiveFixGenerator` - Vertical/horizontal correction
+- `FlashBalanceGenerator` - Auto-balance flash intensity
+- `CustomGenerator` - User-defined .mgk script templates
 
-    public function getScriptTemplate(): string;
-    public function getDefaultParams(): array;
-}
+**Example Implementation:**
 
-// app/Services/Flambient/ScriptGenerator.php
-class ScriptGenerator {
-    public function generate(ProcessingProfile $profile, array $params): string;
-}
+See the "Creating a New Generator" section in [API Documentation](#-api-documentation) for a complete example.
+
+**Migration to Generic Command** (Optional Phase 4):
+
+```bash
+# Future: Generic command with technique selection
+php artisan process:images --technique=flambient
+php artisan process:images --technique=hdr-merge
+php artisan process:images --technique=dmec
+
+# Current: Flambient-specific command (works with plugin architecture)
+php artisan flambient:process --local
 ```
 
 ### **2. Capture One Integration**
@@ -773,7 +894,47 @@ For issues, questions, or feature requests:
 -   **GitHub Issues**: [Create an issue](https://github.com/yourusername/terminal-flazsh/issues)
 -   **Documentation**: See `/docs` folder for detailed guides
 -   **Architecture**: Read [ARCHITECTURE_REDESIGN.md](./ARCHITECTURE_REDESIGN.md)
+-   **Refactoring Plan**: Read [docs/refactoring-plan.md](./docs/refactoring-plan.md)
 -   **Imagen Integration**: Read [IMAGEN_INTEGRATION.md](./IMAGEN_INTEGRATION.md)
+
+------------------------------------------------------------------------
+
+## 🔄 Recent Updates
+
+### **v2.0 - Plugin Architecture** (December 2024)
+
+**Major Refactoring:** Transformed from tightly-coupled Flambient-only processing to a modular, plugin-based architecture.
+
+**What Changed:**
+
+✅ **New Plugin System**
+
+- `ScriptGeneratorInterface` - Contract for all processing techniques
+- `ScriptGeneratorRegistry` - Central registry for generators
+- `FlambientGenerator` - Extracted flambient logic into a plugin
+- `ImageProcessorServiceProvider` - Service provider for generator registration
+
+✅ **Refactored Services**
+
+- Moved from `App\Services\Flambient\*` to `App\Services\ImageProcessor\*`
+- `ImageMagickService` now generic (accepts any generator)
+- `ExifService` moved to ImageProcessor namespace
+- `FlambientProcessCommand` updated to use registry pattern
+
+✅ **Backwards Compatible**
+
+- Existing `php artisan flambient:process` command still works
+- Same workflow and CLI experience
+- No breaking changes for users
+
+**Benefits:**
+
+- 🎯 Add new techniques without modifying core code
+- 🧩 Each technique is self-contained and testable
+- 🚀 Easy to implement D-MEC, HDR, Focus Stacking, etc.
+- 📦 Future-proof architecture for growth
+
+**See:** [docs/refactoring-plan.md](./docs/refactoring-plan.md) for complete implementation details.
 
 ------------------------------------------------------------------------
 

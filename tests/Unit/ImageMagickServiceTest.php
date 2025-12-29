@@ -4,7 +4,7 @@ namespace Tests\Unit;
 
 use App\DTOs\WorkflowConfig;
 use App\Enums\ImageType;
-use App\Services\Flambient\ImageMagickService;
+use App\Services\ImageProcessor\ImageMagickService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;

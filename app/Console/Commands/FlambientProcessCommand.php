@@ -7,8 +7,9 @@ use App\DataObjects\WorkflowConfig;
 use App\Enums\ImageClassificationStrategy;
 use App\Enums\WorkflowStatus;
 use App\Models\WorkflowRun;
-use App\Services\Flambient\ExifService;
-use App\Services\Flambient\ImageMagickService;
+use App\Services\ImageProcessor\ExifService;
+use App\Services\ImageProcessor\ImageMagickService;
+use App\Services\ImageProcessor\ScriptGeneratorRegistry;
 use App\Services\ImagenAI\ImagenClient;
 use App\Services\ImagenAI\ImagenEditOptions;
 use App\Services\ImagenAI\ImagenException;
@@ -36,7 +37,7 @@ class FlambientProcessCommand extends Command
 
     protected $description = 'Process flambient photography workflow with ImageMagick and optional Imagen AI enhancement';
 
-    public function handle(): int
+    public function handle(ScriptGeneratorRegistry $registry): int
     {
         // Welcome Banner
         info('🎨 Flambient Photography Processor');
@@ -352,24 +353,38 @@ class FlambientProcessCommand extends Command
             info('Step 3/7: Processing images with ImageMagick');
             note('This may take several minutes for large groups');
 
+            // Get the Flambient generator from the registry
+            $generator = $registry->get('flambient');
+            if (!$generator) {
+                throw new \RuntimeException('Flambient generator not found in registry');
+            }
+
+            // Create ImageMagick service
             $imageMagickService = new ImageMagickService(
-                levelLow: $config->levelLow,
-                levelHigh: $config->levelHigh,
-                gamma: $config->gamma,
-                outputPrefix: $config->outputPrefix,
-                enableDarkenExport: false, // Disable _tmp files
+                binary: config('flambient.imagemagick.binary', 'magick')
             );
+
+            // Prepare generator configuration
+            $generatorConfig = [
+                'level_low' => $config->levelLow,
+                'level_high' => $config->levelHigh,
+                'gamma' => $config->gamma,
+                'output_prefix' => $config->outputPrefix,
+                'enable_darken_export' => false, // Disable _tmp files
+            ];
 
             $startTime = microtime(true);
 
             $processResult = spin(
-                callback: function() use ($imageMagickService, $config, $analyzeResult) {
+                callback: function() use ($imageMagickService, $generator, $generatorConfig, $config, $analyzeResult) {
                     // Generate .mgk scripts for all groups
                     $scripts = $imageMagickService->generateScripts(
+                        generator: $generator,
                         groups: $analyzeResult->data['groups'],
+                        config: $generatorConfig,
                         imageDirectory: $config->imageDirectory,
                         scriptsDirectory: "{$config->outputDirectory}/scripts",
-                        flambientDirectory: "{$config->outputDirectory}/flambient"
+                        outputDirectory: "{$config->outputDirectory}/flambient"
                     );
 
                     // Execute all scripts via master script
