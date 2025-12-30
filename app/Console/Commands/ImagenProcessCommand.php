@@ -57,7 +57,7 @@ class ImagenProcessCommand extends Command
         {--crop : Enable auto-crop}
         {--perspective : Enable perspective correction}
         {--hdr : Enable HDR merge}
-        {--pattern=*.jpg,*.jpeg,*.JPG,*.JPEG,*.cr2,*.CR2,*.nef,*.NEF,*.arw,*.ARW,*.dng,*.DNG : File pattern to match}
+        {--pattern= : File pattern to match (comma-separated, e.g., *.jpg,*.cr2)}
         {--source=manual : Source type (manual, shortcut, flambient, product)}
         {--parent= : Parent job ID for multi-pass workflows}
         {--resume= : Resume a previous job by ID}
@@ -202,15 +202,18 @@ class ImagenProcessCommand extends Command
             $this->job->markStarted();
 
             // Determine where to start based on status
+            // Uses intentional fall-through to continue from the failed step
             switch ($fromStep) {
                 case ImagenJobStatus::Pending:
                 case ImagenJobStatus::Uploading:
                     $this->stepUpload();
-                    // Fall through to next steps
+                    // no break - intentional fall-through to continue workflow
                 case ImagenJobStatus::Processing:
                     $this->stepProcess();
+                    // no break - intentional fall-through
                 case ImagenJobStatus::Exporting:
                     $this->stepExport();
+                    // no break - intentional fall-through
                 case ImagenJobStatus::Downloading:
                     $this->stepDownload();
                     break;
@@ -719,7 +722,22 @@ class ImagenProcessCommand extends Command
 
     private function discoverImages(string $directory): array
     {
-        $patterns = explode(',', $this->option('pattern'));
+        $patternOption = $this->option('pattern');
+
+        // Default patterns for common image formats
+        $defaultPatterns = [
+            '*.jpg', '*.jpeg', '*.JPG', '*.JPEG',
+            '*.cr2', '*.CR2', '*.cr3', '*.CR3',
+            '*.nef', '*.NEF',
+            '*.arw', '*.ARW',
+            '*.dng', '*.DNG',
+            '*.raf', '*.RAF',
+        ];
+
+        $patterns = $patternOption
+            ? explode(',', $patternOption)
+            : $defaultPatterns;
+
         $images = [];
 
         foreach ($patterns as $pattern) {

@@ -253,3 +253,29 @@ If you encounter issues:
 **Testing Date:** [Add date when testing is performed]
 **Tested By:** [Add your name]
 **Result:** [PASS/FAIL with notes]
+
+# Pass 1: RAW → Imagen (no window pull)
+php artisan imagen:process \
+  --input="/Users/davepeloso/Pictures/ProFoto/Capture" \
+  --output="public/995-Golden-Crest" \
+  --profile=YOUR_RAW_PROFILE \
+  --source=shortcut
+
+# Pass 2: ImageMagick blending  
+php artisan flambient:process \
+  --project="995-Golden-Crest" \
+  --dir="public/995-Golden-Crest" \
+  --local
+
+# Pass 3: Imagen with window pull
+php artisan imagen:process \
+  --input="storage/flambient/995-Golden-Crest/flambient" \
+  --output="storage/flambient/995-Golden-Crest" \
+  --window-pull \
+  --type=real_estate \
+  --source=shortcut \
+  --parent=<first-job-id>
+
+  # Darktable Ajustments for Real Estate
+
+  dt-render "input.jpg" "output.jpg" --style "re-ajustments"

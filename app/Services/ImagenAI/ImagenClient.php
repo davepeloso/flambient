@@ -275,11 +275,9 @@ class ImagenClient
             'crop' => $options->crop,
             'portrait_crop' => $options->portraitCrop,
             'headshot_crop' => $options->headshotCrop,
-            'crop_aspect_ratio' => $options->cropAspectRatio,
             'hdr_merge' => $options->hdrMerge,
             'straighten' => $options->straighten,
             'subject_mask' => $options->subjectMask,
-            'photography_type' => $options->photographyType?->value,
             'smooth_skin' => $options->smoothSkin,
             'perspective_correction' => $options->perspectiveCorrection,
             'window_pull' => $options->windowPull,
@@ -288,6 +286,12 @@ class ImagenClient
         ];
 
         // Optional parameters (only include if not null)
+        if ($options->cropAspectRatio !== null) {
+            $payload['crop_aspect_ratio'] = $options->cropAspectRatio;
+        }
+        if ($options->photographyType !== null) {
+            $payload['photography_type'] = $options->photographyType->value;
+        }
         if ($options->callbackUrl !== null) {
             $payload['callback_url'] = $options->callbackUrl;
         }

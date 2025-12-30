@@ -63,14 +63,14 @@ enum ImagenJobStatus: string
     public function label(): string
     {
         return match($this) {
-            self::Pending => 'Pending',
-            self::Uploading => 'Uploading',
-            self::Processing => 'Processing',
-            self::Exporting => 'Exporting',
-            self::Downloading => 'Downloading',
-            self::Completed => 'Completed',
-            self::Failed => 'Failed',
-            self::Cancelled => 'Cancelled',
+            self::Pending => '⏳ Pending',
+            self::Uploading => '📤 Uploading',
+            self::Processing => '🤖 Processing',
+            self::Exporting => '📦 Exporting',
+            self::Downloading => '📥 Downloading',
+            self::Completed => '✅ Completed',
+            self::Failed => '❌ Failed',
+            self::Cancelled => '🚫 Cancelled',
         };
     }
 
