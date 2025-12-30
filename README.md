@@ -57,6 +57,7 @@ This application represents a **complete architectural redesign** from fragile s
 
 ### **Key Design Principles**
 
+<<<<<<< HEAD
 1.  **Plugin Architecture** - Modular script generators for different processing techniques
 2.  **Explicit State Management** - All workflow state persisted to SQLite
 3.  **Type Safety** - Enums, DTOs, readonly classes throughout
@@ -82,6 +83,13 @@ ImageMagickService (generic executor)
 - ✅ Each technique is self-contained with its own configuration
 - ✅ Easy to test individual generators independently
 - ✅ Future-proof for new ImageMagick workflows
+=======
+1.  **Explicit State Management** - All workflow state persisted to SQLite
+2.  **Type Safety** - Enums, DTOs, readonly classes throughout
+3.  **Separation of Concerns** - Services for EXIF, ImageMagick, Imagen AI
+4.  **Laravel-Native** - HTTP client, Prompts, Collections, Eloquent
+5.  **Testability** - All external dependencies mockable
+>>>>>>> origin/main
 
 ### **Workflow Steps**
 
@@ -625,8 +633,13 @@ public function register(): void
 
 ### **ExifService**
 
+<<<<<<< HEAD
 ```php
 use App\Services\ImageProcessor\ExifService;
+=======
+``` php
+use App\Services\Flambient\ExifService;
+>>>>>>> origin/main
 use App\Enums\ImageClassificationStrategy;
 
 $service = new ExifService(
@@ -646,9 +659,14 @@ $groups = $service->groupImages($metadata);
 
 ### **ImageMagickService**
 
+<<<<<<< HEAD
 ```php
 use App\Services\ImageProcessor\ImageMagickService;
 use App\Services\ImageProcessor\ScriptGeneratorRegistry;
+=======
+``` php
+use App\Services\Flambient\ImageMagickService;
+>>>>>>> origin/main
 
 $service = new ImageMagickService(binary: 'magick');
 $registry = app(ScriptGeneratorRegistry::class);
@@ -710,6 +728,7 @@ For complete API reference, see: - [**IMAGEN_INTEGRATION.md**](./IMAGEN_INTEGRAT
 
 ### **1. Additional Image Processing Generators** ✅ Architecture Complete
 
+<<<<<<< HEAD
 **Current:** Plugin architecture implemented with Flambient generator
 **Status:** ✅ **Ready to add new generators** - infrastructure complete!
 
@@ -743,6 +762,37 @@ php artisan process:images --technique=dmec
 
 # Current: Flambient-specific command (works with plugin architecture)
 php artisan flambient:process --local
+=======
+**Current:** Single flambient blend algorithm **Future:** Multiple processing profiles to choose from
+
+``` bash
+php artisan flambient:process --profile=hdr-merge
+php artisan flambient:process --profile=window-pull
+php artisan flambient:process --profile=flash-balance
+php artisan flambient:process --profile=custom
+```
+
+**Potential Profiles:** - `flambient` (default) - Standard ambient/flash blend - `hdr-merge` - HDR tone mapping with multiple exposures - `window-pull` - Specialized window light enhancement - `flash-balance` - Auto-balance flash intensity - `perspective-fix` - Vertical/horizontal correction - `custom` - User-defined .mgk script templates
+
+**Implementation Plan:**
+
+``` php
+// app/Enums/ProcessingProfile.php
+enum ProcessingProfile: string {
+    case Flambient = 'flambient';
+    case HdrMerge = 'hdr-merge';
+    case WindowPull = 'window-pull';
+    case FlashBalance = 'flash-balance';
+
+    public function getScriptTemplate(): string;
+    public function getDefaultParams(): array;
+}
+
+// app/Services/Flambient/ScriptGenerator.php
+class ScriptGenerator {
+    public function generate(ProcessingProfile $profile, array $params): string;
+}
+>>>>>>> origin/main
 ```
 
 ### **2. Capture One Integration**
@@ -894,6 +944,7 @@ For issues, questions, or feature requests:
 -   **GitHub Issues**: [Create an issue](https://github.com/yourusername/terminal-flazsh/issues)
 -   **Documentation**: See `/docs` folder for detailed guides
 -   **Architecture**: Read [ARCHITECTURE_REDESIGN.md](./ARCHITECTURE_REDESIGN.md)
+<<<<<<< HEAD
 -   **Refactoring Plan**: Read [docs/refactoring-plan.md](./docs/refactoring-plan.md)
 -   **Imagen Integration**: Read [IMAGEN_INTEGRATION.md](./IMAGEN_INTEGRATION.md)
 
@@ -937,6 +988,11 @@ For issues, questions, or feature requests:
 **See:** [docs/refactoring-plan.md](./docs/refactoring-plan.md) for complete implementation details.
 
 ------------------------------------------------------------------------
+=======
+-   **Imagen Integration**: Read [IMAGEN_INTEGRATION.md](./IMAGEN_INTEGRATION.md)
+
+------------------------------------------------------------------------
+>>>>>>> origin/main
 
 **Built with ❤️ using Laravel 11, PHP 8.2, and modern development practices**
 
