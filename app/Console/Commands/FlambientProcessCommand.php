@@ -7,8 +7,9 @@ use App\DataObjects\WorkflowConfig;
 use App\Enums\ImageClassificationStrategy;
 use App\Enums\WorkflowStatus;
 use App\Models\WorkflowRun;
-use App\Services\Flambient\ExifService;
-use App\Services\Flambient\ImageMagickService;
+use App\Services\ImageProcessor\ExifService;
+use App\Services\ImageProcessor\ImageMagickService;
+use App\Services\ImageProcessor\ScriptGeneratorRegistry;
 use App\Services\ImagenAI\ImagenClient;
 use App\Services\ImagenAI\ImagenEditOptions;
 use App\Services\ImagenAI\ImagenException;
@@ -21,6 +22,7 @@ use Illuminate\Support\Str;
 use function Laravel\Prompts\confirm;
 use function Laravel\Prompts\info;
 use function Laravel\Prompts\note;
+use function Laravel\Prompts\progress;
 use function Laravel\Prompts\select;
 use function Laravel\Prompts\spin;
 use function Laravel\Prompts\text;
@@ -35,7 +37,7 @@ class FlambientProcessCommand extends Command
 
     protected $description = 'Process flambient photography workflow with ImageMagick and optional Imagen AI enhancement';
 
-    public function handle(): int
+    public function handle(ScriptGeneratorRegistry $registry): int
     {
         // Welcome Banner
         info('🎨 Flambient Photography Processor');
@@ -351,24 +353,38 @@ class FlambientProcessCommand extends Command
             info('Step 3/7: Processing images with ImageMagick');
             note('This may take several minutes for large groups');
 
+            // Get the Flambient generator from the registry
+            $generator = $registry->get('flambient');
+            if (!$generator) {
+                throw new \RuntimeException('Flambient generator not found in registry');
+            }
+
+            // Create ImageMagick service
             $imageMagickService = new ImageMagickService(
-                levelLow: $config->levelLow,
-                levelHigh: $config->levelHigh,
-                gamma: $config->gamma,
-                outputPrefix: $config->outputPrefix,
-                enableDarkenExport: false, // Disable _tmp files
+                binary: config('flambient.imagemagick.binary', 'magick')
             );
+
+            // Prepare generator configuration
+            $generatorConfig = [
+                'level_low' => $config->levelLow,
+                'level_high' => $config->levelHigh,
+                'gamma' => $config->gamma,
+                'output_prefix' => $config->outputPrefix,
+                'enable_darken_export' => false, // Disable _tmp files
+            ];
 
             $startTime = microtime(true);
 
             $processResult = spin(
-                callback: function() use ($imageMagickService, $config, $analyzeResult) {
+                callback: function() use ($imageMagickService, $generator, $generatorConfig, $config, $analyzeResult) {
                     // Generate .mgk scripts for all groups
                     $scripts = $imageMagickService->generateScripts(
+                        generator: $generator,
                         groups: $analyzeResult->data['groups'],
+                        config: $generatorConfig,
                         imageDirectory: $config->imageDirectory,
                         scriptsDirectory: "{$config->outputDirectory}/scripts",
-                        flambientDirectory: "{$config->outputDirectory}/flambient"
+                        outputDirectory: "{$config->outputDirectory}/flambient"
                     );
 
                     // Execute all scripts via master script
@@ -478,19 +494,31 @@ class FlambientProcessCommand extends Command
                 }
 
                 info("Uploading " . count($blendedImages) . " images to Imagen AI...");
+                $this->newLine();
+
+                // Create progress bar for uploads
+                $uploadProgress = progress(
+                    label: 'Uploading images',
+                    steps: count($blendedImages),
+                    hint: 'Uploading to S3 via presigned URLs...'
+                );
+                $uploadProgress->start();
 
                 // Upload images with progress tracking
                 $uploadedCount = 0;
                 $uploadResult = $imagenClient->uploadImages(
                     projectUuid: $imagenProject->uuid,
                     filePaths: $blendedImages,
-                    progressCallback: function ($current, $total, $filename) use (&$uploadedCount) {
+                    progressCallback: function ($current, $total, $filename) use (&$uploadedCount, $uploadProgress) {
                         $uploadedCount = $current;
-                        if ($current % 5 === 0 || $current === $total) {
-                            $this->components->info("  Uploaded {$current}/{$total}: " . basename($filename));
-                        }
+                        $uploadProgress->advance();
+                        $uploadProgress->label("Uploading images");
+                        $uploadProgress->hint("{$current}/{$total} - " . basename($filename));
                     }
                 );
+
+                $uploadProgress->finish();
+                $this->newLine();
 
                 if (!$uploadResult->isFullySuccessful()) {
                     $failedCount = count($uploadResult->failed);
@@ -500,28 +528,30 @@ class FlambientProcessCommand extends Command
                 note("✓ Upload complete: {$uploadedCount}/{$uploadResult->totalFiles} files ({$uploadResult->getSuccessRate()}% success)");
                 $this->newLine();
 
-                // Verify uploads reached Imagen AI (prevents "No images uploaded" error)
-                info("Verifying uploads with Imagen AI...");
-                $filenames = array_map('basename', $blendedImages);
-                $isVerified = spin(
-                    callback: fn() => $imagenClient->verifyUploadsReady($imagenProject->uuid, $filenames),
-                    message: 'Checking that files are accessible...'
-                );
+                // Verify uploads succeeded (prevents "No images uploaded" error)
+                info("Verifying upload results...");
+                $isVerified = $imagenClient->verifyUploadsReady($uploadResult);
 
                 if (!$isVerified) {
-                    warning("⚠ Upload verification failed - files may not be accessible to Imagen AI");
-                    warning("This usually means the upload didn't complete successfully.");
-
-                    if (!confirm('Try to proceed with editing anyway? (may fail)', default: false)) {
-                        $this->newLine();
-                        note("Upload failed. Possible causes:");
-                        note("  • Files were moved/deleted during upload");
-                        note("  • Network connection interrupted");
-                        note("  • S3 upload timeout");
-                        return self::FAILURE;
+                    $this->newLine();
+                    warning("❌ Upload verification FAILED!");
+                    warning("Files that failed: " . implode(', ', array_slice($uploadResult->failed, 0, 5)));
+                    if (count($uploadResult->failed) > 5) {
+                        warning("... and " . (count($uploadResult->failed) - 5) . " more");
                     }
+
+                    $this->newLine();
+                    note("Common causes:");
+                    note("  • S3 signature mismatch (Content-Type header issue)");
+                    note("  • Network timeouts or connection issues");
+                    note("  • Files moved/deleted during upload");
+                    note("  • S3 presigned URL expired");
+
+                    $this->newLine();
+                    warning("Cannot proceed with editing - no files were successfully uploaded.");
+                    return self::FAILURE;
                 } else {
-                    note("✓ Upload verified - all files accessible to Imagen AI");
+                    note("✓ Upload verified - all {$uploadResult->totalFiles} files uploaded successfully");
                 }
 
                 $this->newLine();
@@ -534,16 +564,10 @@ class FlambientProcessCommand extends Command
 
                 // Select editing profile
                 $profileKey = $this->selectImagenProfile();
-                $this->newLine();
 
-                // Get edit options
-                $editOptions = new ImagenEditOptions(
-                    crop: false,
-                    windowPull: true,
-                    perspectiveCorrection: false,
-                    hdrMerge: false,
-                    photographyType: ImagenPhotographyType::REAL_ESTATE
-                );
+                // Select edit parameters preset
+                $editOptions = $this->selectEditPreset();
+                $this->newLine();
 
                 spin(
                     callback: fn() => $imagenClient->startEditing(
@@ -566,27 +590,37 @@ class FlambientProcessCommand extends Command
                 note('Progress updates will appear below. You can safely cancel (Ctrl+C) and resume later.');
                 $this->newLine();
 
+                // Create progress bar (100 steps for percentage)
+                $progressBar = progress(
+                    label: 'AI editing in progress',
+                    steps: 100,
+                    hint: 'Checking status every 30 seconds...'
+                );
+                $progressBar->start();
+
                 $lastProgress = -1;
                 $editStatus = $imagenClient->pollEditStatus(
                     projectUuid: $imagenProject->uuid,
                     maxAttempts: config('flambient.imagen.poll_max_attempts', 240),
                     intervalSeconds: config('flambient.imagen.poll_interval', 30),
-                    progressCallback: function ($status) use (&$lastProgress) {
-                        if ($status->progress !== $lastProgress) {
-                            $emoji = match(true) {
-                                $status->progress === 100 => '🎉',
-                                $status->progress >= 75 => '🚀',
-                                $status->progress >= 50 => '⚡',
-                                $status->progress >= 25 => '🔄',
-                                default => '⏳'
-                            };
+                    progressCallback: function ($status) use (&$lastProgress, $progressBar) {
+                        if ($status->progress !== $lastProgress && $status->progress > $lastProgress) {
+                            // Advance progress bar to current percentage
+                            $stepsToAdvance = $status->progress - $lastProgress;
+                            for ($i = 0; $i < $stepsToAdvance; $i++) {
+                                $progressBar->advance();
+                            }
 
-                            $this->components->info("{$emoji} Processing: {$status->progress}% - {$status->status}");
+                            // Update label with status
+                            $progressBar->label("AI editing - {$status->status}");
+                            $progressBar->hint("{$status->progress}% complete");
+
                             $lastProgress = $status->progress;
                         }
                     }
                 );
 
+                $progressBar->finish();
                 note("✓ AI editing complete!");
                 $this->newLine();
 
@@ -597,14 +631,44 @@ class FlambientProcessCommand extends Command
                 info('Step 7/8: Exporting to JPEG format');
 
                 spin(
-                    callback: function () use ($imagenClient, $imagenProject) {
-                        $imagenClient->exportProject($imagenProject->uuid);
-                        sleep(10); // Give export time to initialize
-                    },
+                    callback: fn() => $imagenClient->exportProject($imagenProject->uuid),
                     message: 'Initiating JPEG export...'
                 );
 
                 note("✓ Export initiated");
+                note('Waiting for export to complete (typically 1-5 minutes)...');
+                $this->newLine();
+
+                // Poll for export completion
+                $exportProgress = progress(
+                    label: 'Export in progress',
+                    steps: 100,
+                    hint: 'Checking status every 30 seconds...'
+                );
+                $exportProgress->start();
+
+                $lastExportProgress = -1;
+                $exportStatus = $imagenClient->pollExportStatus(
+                    projectUuid: $imagenProject->uuid,
+                    maxAttempts: config('flambient.imagen.poll_max_attempts', 120),
+                    intervalSeconds: config('flambient.imagen.poll_interval', 30),
+                    progressCallback: function ($status) use (&$lastExportProgress, $exportProgress) {
+                        if ($status->progress !== $lastExportProgress && $status->progress > $lastExportProgress) {
+                            $stepsToAdvance = $status->progress - $lastExportProgress;
+                            for ($i = 0; $i < $stepsToAdvance; $i++) {
+                                $exportProgress->advance();
+                            }
+
+                            $exportProgress->label("Export - {$status->status}");
+                            $exportProgress->hint("{$status->progress}% complete");
+
+                            $lastExportProgress = $status->progress;
+                        }
+                    }
+                );
+
+                $exportProgress->finish();
+                note("✓ Export complete!");
                 $this->newLine();
 
                 // ═══════════════════════════════════════════════════════
@@ -620,23 +684,35 @@ class FlambientProcessCommand extends Command
                 );
 
                 note("✓ Found {$exportLinks->count()} files ready for download");
+                $this->newLine();
 
                 // Create output directory for edited images
                 $editedOutputDir = "{$config->outputDirectory}/edited";
                 File::ensureDirectoryExists($editedOutputDir);
+
+                // Create progress bar for downloads
+                $downloadProgress = progress(
+                    label: 'Downloading enhanced images',
+                    steps: $exportLinks->count(),
+                    hint: 'Downloading edited files from Imagen AI...'
+                );
+                $downloadProgress->start();
 
                 // Download files with progress
                 $downloadedCount = 0;
                 $downloadResult = $imagenClient->downloadFiles(
                     downloadLinks: $exportLinks,
                     outputDirectory: $editedOutputDir,
-                    progressCallback: function ($current, $total, $filename) use (&$downloadedCount) {
+                    progressCallback: function ($current, $total, $filename) use (&$downloadedCount, $downloadProgress) {
                         $downloadedCount = $current;
-                        if ($current % 5 === 0 || $current === $total) {
-                            $this->components->info("  Downloaded {$current}/{$total}: " . basename($filename));
-                        }
+                        $downloadProgress->advance();
+                        $downloadProgress->label("Downloading enhanced images");
+                        $downloadProgress->hint("{$current}/{$total} - " . basename($filename));
                     }
                 );
+
+                $downloadProgress->finish();
+                $this->newLine();
 
                 if (!$downloadResult->isFullySuccessful()) {
                     $failedCount = count($downloadResult->failed);
@@ -736,33 +812,48 @@ class FlambientProcessCommand extends Command
 
     /**
      * Prompt user to select an Imagen AI editing profile.
-     * Offers quick selection from favorites or browse all profiles.
+     * Fetches profiles from API and displays with image type information.
      */
     private function selectImagenProfile(): string
     {
-        $favorites = config('imagen-profiles.favorites', []);
-        $allProfiles = config('imagen-profiles.all', []);
         $default = config('imagen-profiles.default');
-
-        // If no favorites configured, just use default
-        if (empty($favorites)) {
-            return (string)$default;
-        }
 
         $this->newLine();
         info('Select Imagen AI Editing Profile');
         note('Profiles determine the AI editing style applied to your images');
 
-        // Ask if they want to select or use default
+        // Fetch profiles from Imagen AI API
+        try {
+            $imagenClient = new \App\Services\ImagenAI\ImagenClient();
+            $allProfiles = $imagenClient->getProfiles();
+        } catch (\Exception $e) {
+            warning("Failed to fetch profiles from API: {$e->getMessage()}");
+            note("Falling back to default profile: {$default}");
+            return (string)$default;
+        }
+
+        if ($allProfiles->isEmpty()) {
+            warning("No profiles available from API");
+            note("Using default profile: {$default}");
+            return (string)$default;
+        }
+
+        // Separate profiles by image type
+        $jpgProfiles = $allProfiles->filter(fn($p) => strtoupper($p->imageType ?? '') === 'JPG');
+        $rawProfiles = $allProfiles->filter(fn($p) => strtoupper($p->imageType ?? '') === 'RAW');
+        $otherProfiles = $allProfiles->filter(fn($p) => empty($p->imageType) || !in_array(strtoupper($p->imageType), ['JPG', 'RAW']));
+
+        // Ask which type to browse
         $choice = select(
-            label: 'How would you like to choose a profile?',
+            label: 'Which profiles would you like to browse?',
             options: [
-                'favorites' => "⭐ Quick Select ({$this->formatCount(count($favorites))} favorites)",
-                'all' => "📋 Browse All Profiles ({$this->formatCount(count($allProfiles))} available)",
+                'jpg' => "📸 JPEG Profiles ({$jpgProfiles->count()} available) - Recommended for flambient workflow",
+                'raw' => "📷 RAW Profiles ({$rawProfiles->count()} available)",
+                'all' => "📋 All Profiles ({$allProfiles->count()} total)",
                 'default' => "✓ Use Default ({$default})",
             ],
-            default: 'favorites',
-            hint: 'Favorites are your most-used profiles for quick access'
+            default: 'jpg',
+            hint: 'JPG profiles work with your blended JPEG images'
         );
 
         // Use default
@@ -771,30 +862,131 @@ class FlambientProcessCommand extends Command
             return (string)$default;
         }
 
-        // Select from favorites (quick select)
-        if ($choice === 'favorites') {
-            $selectedKey = select(
-                label: 'Choose from your favorite profiles',
-                options: $favorites,
-                hint: 'These are your 3 most-used profiles'
-            );
+        // Filter profiles based on choice
+        $profilesToShow = match($choice) {
+            'jpg' => $jpgProfiles,
+            'raw' => $rawProfiles,
+            'all' => $allProfiles,
+            default => $jpgProfiles,
+        };
 
-            $profileName = $favorites[$selectedKey] ?? "Profile {$selectedKey}";
-            note("✓ Selected: {$profileName} (Profile: {$selectedKey})");
-            return (string)$selectedKey;
+        if ($profilesToShow->isEmpty()) {
+            warning("No profiles found for this category");
+            note("Using default profile: {$default}");
+            return (string)$default;
         }
 
-        // Browse all profiles
+        // Format profiles for display: "PROFILE_NAME [JPG] - Personal"
+        $profileOptions = $profilesToShow->mapWithKeys(function ($profile) {
+            $imageType = strtoupper($profile->imageType ?? 'UNKNOWN');
+            $profileType = $profile->profileType ?? 'Unknown';
+            $label = "{$profile->name} [{$imageType}] - {$profileType}";
+            return [$profile->key => $label];
+        })->toArray();
+
+        // Let user select
         $selectedKey = select(
-            label: 'Choose from all available profiles',
-            options: $allProfiles,
-            scroll: 10, // Show 10 at a time for easier scrolling
-            hint: 'Scroll through all available Imagen AI profiles'
+            label: 'Choose your editing profile',
+            options: $profileOptions,
+            scroll: 10,
+            hint: 'Image type shown in [brackets]'
         );
 
-        $profileName = $allProfiles[$selectedKey] ?? "Profile {$selectedKey}";
-        note("✓ Selected: {$profileName} (Profile: {$selectedKey})");
+        // Find selected profile for confirmation message
+        $selectedProfile = $profilesToShow->firstWhere('key', $selectedKey);
+        if ($selectedProfile) {
+            note("✓ Selected: {$selectedProfile->name} [{$selectedProfile->imageType}] (Profile: {$selectedKey})");
+        } else {
+            note("✓ Selected profile: {$selectedKey}");
+        }
+
         return (string)$selectedKey;
+    }
+
+    /**
+     * Prompt user to select edit parameter preset.
+     * Returns ImagenEditOptions configured from the selected preset.
+     */
+    private function selectEditPreset(): ImagenEditOptions
+    {
+        $this->newLine();
+        info('Select Edit Parameters');
+        note('Choose a preset that matches your workflow and desired output');
+
+        // Get presets from config
+        $presets = config('imagen-edit-presets.presets', []);
+        $categories = config('imagen-edit-presets.categories', []);
+        $default = config('imagen-edit-presets.default', 'flambient_real_estate');
+
+        if (empty($presets)) {
+            warning("No edit presets configured");
+            note("Using default flambient settings");
+            return new ImagenEditOptions(
+                windowPull: true,
+                photographyType: ImagenPhotographyType::REAL_ESTATE
+            );
+        }
+
+        // Ask which category to browse
+        $categoryOptions = [];
+        foreach ($categories as $categoryKey => $category) {
+            $categoryLabel = $category['label'] ?? ucfirst($categoryKey);
+            $presetCount = count($category['presets'] ?? []);
+            $categoryOptions[$categoryKey] = "{$categoryLabel} ({$presetCount} presets)";
+        }
+        $categoryOptions['default'] = "✓ Use Default ({$default})";
+
+        $categoryChoice = select(
+            label: 'Which category?',
+            options: $categoryOptions,
+            default: 'real_estate',
+            hint: 'Select the photography type that matches your workflow'
+        );
+
+        // Use default
+        if ($categoryChoice === 'default') {
+            $selectedPresetKey = $default;
+            $selectedPreset = $presets[$selectedPresetKey] ?? null;
+
+            if ($selectedPreset) {
+                note("Using default preset: {$selectedPreset['name']}");
+                return ImagenEditOptions::fromPreset($selectedPreset);
+            }
+        } else {
+            // Get presets for selected category
+            $categoryPresets = $categories[$categoryChoice]['presets'] ?? [];
+
+            if (empty($categoryPresets)) {
+                warning("No presets in this category");
+                note("Using default settings");
+                return new ImagenEditOptions(
+                    windowPull: true,
+                    photographyType: ImagenPhotographyType::REAL_ESTATE
+                );
+            }
+
+            // Build options for selection
+            $presetOptions = [];
+            foreach ($categoryPresets as $presetKey) {
+                if (isset($presets[$presetKey])) {
+                    $preset = $presets[$presetKey];
+                    $presetOptions[$presetKey] = $preset['name'] . "\n   " . ($preset['description'] ?? '');
+                }
+            }
+
+            // Let user select preset
+            $selectedPresetKey = select(
+                label: 'Choose your edit preset',
+                options: $presetOptions,
+                scroll: 8,
+                hint: 'Each preset has different editing options enabled'
+            );
+
+            $selectedPreset = $presets[$selectedPresetKey];
+            note("✓ Selected: {$selectedPreset['name']}");
+        }
+
+        return ImagenEditOptions::fromPreset($selectedPreset);
     }
 
     /**

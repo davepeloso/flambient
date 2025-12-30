@@ -17,8 +17,30 @@ Homestead.json
 /.vagrant
 .phpunit.result.cache
 
+<<<<<<< HEAD
+<<<<<<< Updated upstream
+=======
+>>>>>>> origin/main
 # Flambient specific
 storage/flambient
 public/123-main-street
 public/123-main-street/*.jpg
+<<<<<<< HEAD
 public/123-main-street/*.jpeg
+
+# Ignore all image files in public directory
+public/**/*.jpg
+public/**/*.jpeg
+public/**/*.png
+public/**/*.gif
+public/**/*.svg
+public/**/*.webp
+public/**/*.ico
+
+# Ignore all .DS_Store files
+.DS_Store
+**/.DS_Store
+=======
+=======
+public/123-main-street/*.jpeg
+>>>>>>> origin/main

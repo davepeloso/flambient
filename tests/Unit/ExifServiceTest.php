@@ -4,7 +4,7 @@ namespace Tests\Unit;
 
 use App\Enums\ImageClassificationStrategy;
 use App\Enums\ImageType;
-use App\Services\Flambient\ExifService;
+use App\Services\ImageProcessor\ExifService;
 use Illuminate\Support\Facades\Process;
 use Tests\TestCase;
 
