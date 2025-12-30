@@ -1,6 +1,0 @@
-inquirerpy
-requests
-retry
-tqdm
-typer
-typer-cli
