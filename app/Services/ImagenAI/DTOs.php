@@ -213,6 +213,30 @@ readonly class ImagenEditOptions
             hdrOutputCompression: $preset['hdr_output_compression'] ?? 'LOSSY',
         );
     }
+
+    /**
+     * Convert to array for storage
+     */
+    public function toArray(): array
+    {
+        return [
+            'crop' => $this->crop,
+            'portraitCrop' => $this->portraitCrop,
+            'headshotCrop' => $this->headshotCrop,
+            'cropAspectRatio' => $this->cropAspectRatio,
+            'hdrMerge' => $this->hdrMerge,
+            'straighten' => $this->straighten,
+            'subjectMask' => $this->subjectMask,
+            'photographyType' => $this->photographyType?->value,
+            'callbackUrl' => $this->callbackUrl,
+            'smoothSkin' => $this->smoothSkin,
+            'perspectiveCorrection' => $this->perspectiveCorrection,
+            'windowPull' => $this->windowPull,
+            'skyReplacement' => $this->skyReplacement,
+            'skyReplacementTemplateId' => $this->skyReplacementTemplateId,
+            'hdrOutputCompression' => $this->hdrOutputCompression,
+        ];
+    }
 }
 
 /**
