@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+#
+# Flambient - D-MEC Image Processor
+# Version 2.1.0 "Flazsh Revival"
+#
+# Global command wrapper for the Laravel-based Flambient application
+# This script allows you to run Flambient from anywhere on your system
+
+# Resolve symlinks to find the actual script location
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+    SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$SCRIPT_DIR/$SOURCE"
+done
+SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+
+# Get the project root (one level up from bin/)
+PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
+
+# Change to project directory
+cd "$PROJECT_ROOT" || {
+    echo "Error: Could not change to project directory: $PROJECT_ROOT"
+    exit 1
+}
+
+# Check if artisan exists
+if [ ! -f "artisan" ]; then
+    echo "Error: artisan file not found in $PROJECT_ROOT"
+    exit 1
+fi
+
+# If no arguments provided, run the home command
+if [ $# -eq 0 ]; then
+    php artisan home
+else
+    # Otherwise, pass all arguments to artisan
+    php artisan "$@"
+fi
