@@ -1,0 +1,295 @@
+#!/usr/bin/env zsh
+# ═══════════════════════════════════════════════════════════════════════════════
+# photos-capture-sync
+# ═══════════════════════════════════════════════════════════════════════════════
+# Syncs ALL existing images from Photos Library originals to a flat Capture folder,
+# then continues watching for new arrivals.
+# Use photos-capture-live if you only want to watch for new files.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+set -uo pipefail
+
+# Full paths for all commands (fixes zsh subshell PATH issues)
+DATE=/bin/date
+TEE=/usr/bin/tee
+BASENAME=/usr/bin/basename
+STAT=/usr/bin/stat
+GREP=/usr/bin/grep
+CP=/bin/cp
+MKDIR=/bin/mkdir
+ECHO=/bin/echo
+SLEEP=/bin/sleep
+FIND=/usr/bin/find
+WC=/usr/bin/wc
+TR=/usr/bin/tr
+TOUCH=/usr/bin/touch
+KILL=/bin/kill
+
+# Image extensions to capture
+IMAGE_EXTENSIONS=("jpeg" "jpg" "heic" "dng" "raw" "cr2" "cr3" "nef" "arw" "tiff" "tif" "png" "raf" "orf" "rw2")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOGGING
+# ─────────────────────────────────────────────────────────────────────────────
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/photos-capture"
+$MKDIR -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/photos-capture.log"
+
+log() {
+  local level="$1"; shift
+  local msg="$*"
+  local ts="$($DATE '+%Y-%m-%d %H:%M:%S')"
+  $ECHO "[$ts] [$level] $msg" | $TEE -a "$LOG_FILE"
+}
+
+log_debug() { log "DEBUG" "$@"; }
+log_info()  { log "INFO " "$@"; }
+log_warn()  { log "WARN " "$@"; }
+log_error() { log "ERROR" "$@"; }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# USAGE
+# ─────────────────────────────────────────────────────────────────────────────
+usage() {
+  cat <<EOF
+Usage: photos-capture-sync <CAPTURE_DIR> [PHOTOS_LIBRARY_PATH]
+
+Syncs ALL existing images to a flat capture folder, then watches for new ones.
+Use photos-capture-live if you only want to watch for new files.
+
+Arguments:
+  CAPTURE_DIR          Destination folder for captured images (e.g., ~/CaptureOne/Inbox)
+  PHOTOS_LIBRARY_PATH  Optional. Defaults to ~/Pictures/Photos Library.photoslibrary
+
+Examples:
+  photos-capture-sync ~/CaptureOne/Inbox
+  photos-capture-sync /Volumes/FastSSD/Capture ~/Pictures/Photos\ Library.photoslibrary
+
+Log file: $LOG_FILE
+State DB: $LOG_DIR/seen.txt
+EOF
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEPENDENCY CHECK
+# ─────────────────────────────────────────────────────────────────────────────
+if ! command -v fswatch >/dev/null 2>&1; then
+  echo "ERROR: Missing fswatch. Install with: sudo port install fswatch"
+  exit 1
+fi
+FSWATCH=$(command -v fswatch)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ARGUMENT PARSING
+# ─────────────────────────────────────────────────────────────────────────────
+DEST="${1:-}"
+LIB="${2:-$HOME/Pictures/Photos Library.photoslibrary}"
+
+[[ -n "$DEST" ]] || { usage; exit 1; }
+
+ORIG="$LIB/originals"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VALIDATION
+# ─────────────────────────────────────────────────────────────────────────────
+log_info "Starting photos-capture-sync"
+log_info "Capture folder: $DEST"
+log_info "Photos library: $LIB"
+
+[[ -d "$LIB" ]] || { log_error "Photos library not found: $LIB"; exit 1; }
+[[ -d "$ORIG" ]] || { log_error "Originals folder not found: $ORIG"; exit 1; }
+
+if ! ls "$ORIG" >/dev/null 2>&1; then
+  log_error "Cannot read originals folder - grant Full Disk Access to Terminal"
+  exit 1
+fi
+
+$MKDIR -p "$DEST" || { log_error "Cannot create capture folder: $DEST"; exit 1; }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STATE DATABASE
+# ─────────────────────────────────────────────────────────────────────────────
+SEEN_DB="$LOG_DIR/seen.txt"
+$TOUCH "$SEEN_DB"
+log_info "State database: $SEEN_DB ($($WC -l < "$SEEN_DB" | $TR -d ' ') entries)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPER: Check if file is an image
+# ─────────────────────────────────────────────────────────────────────────────
+is_image() {
+  local f="$1"
+  local ext="${f##*.}"
+  ext="${ext:l}"  # lowercase in zsh
+  for valid in "${IMAGE_EXTENSIONS[@]}"; do
+    [[ "$ext" == "$valid" ]] && return 0
+  done
+  return 1
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPER: Wait for file to stabilize
+# ─────────────────────────────────────────────────────────────────────────────
+wait_for_stable() {
+  local f="$1"
+  local max_attempts=10
+  local attempt=0
+
+  [[ -f "$f" ]] || return 1
+
+  while (( attempt < max_attempts )); do
+    local s1=$($STAT -f%z "$f" 2>/dev/null || $ECHO -1)
+    [[ "$s1" == "-1" ]] && return 1
+    
+    $SLEEP 1
+    
+    local s2=$($STAT -f%z "$f" 2>/dev/null || $ECHO -1)
+    [[ "$s2" == "-1" ]] && return 1
+    
+    if [[ "$s1" -ne 0 && "$s1" -eq "$s2" ]]; then
+      log_debug "File stable at ${s2} bytes: $($BASENAME "$f")"
+      return 0
+    fi
+    
+    log_debug "File changing (${s1} -> ${s2}): $($BASENAME "$f")"
+    (( attempt++ ))
+  done
+  
+  return 1
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPER: Copy a single file (used by both sync and watch)
+# ─────────────────────────────────────────────────────────────────────────────
+copy_one() {
+  local src="$1"
+  local skip_stable="${2:-false}"  # Skip stability check for initial sync
+
+  # Must be a file
+  [[ -f "$src" ]] || return 0
+  
+  # Must be under originals/
+  [[ "$src" == "$ORIG/"* ]] || return 0
+  
+  # Must be an image
+  is_image "$src" || {
+    log_debug "Skipping non-image: $($BASENAME "$src")"
+    return 0
+  }
+  
+  # Skip hidden/temp files
+  local filename="$($BASENAME "$src")"
+  [[ "$filename" == .* ]] && return 0
+  [[ "$filename" == *".tmp" ]] && return 0
+
+  # Build dedup key
+  local sz=$($STAT -f%z "$src" 2>/dev/null || $ECHO 0)
+  local mt=$($STAT -f%m "$src" 2>/dev/null || $ECHO 0)
+  local key="${src}::${sz}::${mt}"
+
+  # Already processed?
+  $GREP -Fqx "$key" "$SEEN_DB" 2>/dev/null && {
+    log_debug "Already copied: $filename"
+    return 0
+  }
+
+  log_info "New image: $filename (${sz} bytes)"
+
+  # Wait for file to finish writing (skip for initial sync)
+  if [[ "$skip_stable" != "true" ]]; then
+    wait_for_stable "$src" || {
+      log_warn "Skipping unstable file: $filename"
+      return 0
+    }
+  fi
+
+  # Determine output path (handle collisions)
+  local base="$($BASENAME -- "$src")"
+  local out="$DEST/$base"
+
+  if [[ -e "$out" ]]; then
+    local name="${base%.*}"
+    local ext=""
+    [[ "$base" == *.* ]] && ext=".${base##*.}"
+    local i=1
+    while [[ -e "$DEST/${name}_$i$ext" ]]; do
+      (( i++ ))
+    done
+    out="$DEST/${name}_$i$ext"
+    log_info "Name collision, using: $($BASENAME "$out")"
+  fi
+
+  # Copy
+  if $CP -p "$src" "$out" 2>&1; then
+    $ECHO "$key" >> "$SEEN_DB"
+    log_info "SUCCESS: $($BASENAME "$src") -> $($BASENAME "$out")"
+  else
+    log_error "FAILED: Could not copy $filename"
+    return 1
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INITIAL SYNC
+# ─────────────────────────────────────────────────────────────────────────────
+do_initial_sync() {
+  log_info "Starting initial sync..."
+  
+  local count=0
+  local copied=0
+  
+  # Build find pattern for image extensions
+  local find_args=()
+  for ext in "${IMAGE_EXTENSIONS[@]}"; do
+    [[ ${#find_args[@]} -gt 0 ]] && find_args+=("-o")
+    find_args+=("-iname" "*.$ext")
+  done
+  
+  # Find and copy all images
+  while IFS= read -r file; do
+    (( count++ ))
+    if copy_one "$file" "true"; then
+      (( copied++ ))
+    fi
+  done < <($FIND "$ORIG" -type f \( "${find_args[@]}" \) 2>/dev/null)
+  
+  log_info "Initial sync complete: $copied new files copied ($count total found)"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "╔══════════════════════════════════════════════════════════════════════╗"
+echo "║  Photos Capture - SYNC MODE                                          ║"
+echo "╠══════════════════════════════════════════════════════════════════════╣"
+echo "║  Will sync ALL existing images, then watch for new ones              ║"
+echo "║  Source: $ORIG"
+echo "║  Capture: $DEST"
+echo "╠══════════════════════════════════════════════════════════════════════╣"
+echo "║  Press Ctrl+C to stop                                                ║"
+echo "╚══════════════════════════════════════════════════════════════════════╝"
+echo ""
+
+log_info "════════════════════════════════════════════════════════════════"
+log_info "Sync mode started"
+log_info "════════════════════════════════════════════════════════════════"
+
+# Do initial sync
+do_initial_sync
+
+log_info "Starting live watch..."
+
+# Watch loop using process substitution
+while IFS= read -r path; do
+  log_debug "Event: $path"
+  copy_one "$path"
+done < <($FSWATCH -r \
+  --event Created \
+  --event Updated \
+  --event Renamed \
+  --event MovedTo \
+  --event CloseWrite \
+  --latency=0.5 \
+  "$ORIG" 2>&1)
+
+log_info "Watcher stopped"

@@ -1,0 +1,312 @@
+#!/usr/bin/env zsh
+set -uo pipefail  # Removed -e so we can handle errors ourselves due to fswatch issues
+
+# Ensure PATH is available in subshells (fixes pipe into while loop issue)
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/local/bin:$PATH"
+
+# Define full paths for commands used in watch loop (zsh subshell PATH issues)
+DATE=/bin/date
+TEE=/usr/bin/tee
+BASENAME=/usr/bin/basename
+STAT=/usr/bin/stat
+GREP=/usr/bin/grep
+RSYNC=/usr/bin/rsync
+CP=/bin/cp
+MKDIR=/bin/mkdir
+ECHO=/bin/echo
+SLEEP=/bin/sleep
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOGGING SETUP
+# ─────────────────────────────────────────────────────────────────────────────
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/photos-tether"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/photos-tether.log"
+
+log() {
+  local level="$1"
+  shift
+  local msg="$*"
+  local ts="$($DATE '+%Y-%m-%d %H:%M:%S')"
+  $ECHO "[$ts] [$level] $msg" | $TEE -a "$LOG_FILE"
+}
+
+log_debug() { log "DEBUG" "$@"; }
+log_info()  { log "INFO " "$@"; }
+log_warn()  { log "WARN " "$@"; }
+log_error() { log "ERROR" "$@"; }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# USAGE
+# ─────────────────────────────────────────────────────────────────────────────
+usage() {
+  cat <<EOF
+Usage: photos-tether-debug <DEST_DIR> [PHOTOS_LIBRARY_PATH]
+
+Examples:
+  photos-tether-debug ~/Shoot-Ingest
+  photos-tether-debug ~/Shoot-Ingest ~/Pictures/Photos\ Library.photoslibrary
+
+Log file: $LOG_FILE
+EOF
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEPENDENCY CHECKS
+# ─────────────────────────────────────────────────────────────────────────────
+log_info "Starting photos-tether-debug"
+log_info "Checking dependencies..."
+
+if ! command -v fswatch >/dev/null 2>&1; then
+  log_error "Missing fswatch. Install with: sudo port install fswatch"
+  exit 1
+fi
+log_info "fswatch found: $(which fswatch)"
+
+if ! command -v rsync >/dev/null 2>&1; then
+  log_error "Missing rsync"
+  exit 1
+fi
+log_info "rsync found: $(which rsync)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ARGUMENT PARSING
+# ─────────────────────────────────────────────────────────────────────────────
+DEST="${1:-}"
+LIB="${2:-$HOME/Pictures/Photos Library.photoslibrary}"
+
+if [[ -z "$DEST" ]]; then
+  usage
+  exit 1
+fi
+
+log_info "Destination directory: $DEST"
+log_info "Photos library path: $LIB"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PATH VALIDATION
+# ─────────────────────────────────────────────────────────────────────────────
+ORIG="$LIB/originals"
+
+log_info "Checking library structure..."
+
+if [[ ! -d "$LIB" ]]; then
+  log_error "Photos library not found: $LIB"
+  log_error "Make sure the path is correct and Photos app has created the library"
+  exit 1
+fi
+log_info "Library exists: $LIB"
+
+if [[ ! -d "$ORIG" ]]; then
+  log_error "Originals folder not found: $ORIG"
+  log_info "Listing library contents for debugging:"
+  ls -la "$LIB" 2>&1 | while read line; do log_debug "  $line"; done
+  exit 1
+fi
+log_info "Originals folder exists: $ORIG"
+
+# Check if we can actually read the originals folder
+if ! ls "$ORIG" >/dev/null 2>&1; then
+  log_error "Cannot read originals folder - likely a permissions issue"
+  log_error "Grant Full Disk Access to Terminal in System Settings > Privacy & Security"
+  exit 1
+fi
+log_info "Can read originals folder"
+
+# Count existing files
+EXISTING_COUNT=$(find "$ORIG" -type f 2>/dev/null | wc -l | tr -d ' ')
+log_info "Found $EXISTING_COUNT existing files in originals"
+
+# Create destination
+if ! mkdir -p "$DEST" 2>&1; then
+  log_error "Cannot create destination directory: $DEST"
+  exit 1
+fi
+log_info "Destination directory ready: $DEST"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STATE MANAGEMENT
+# ─────────────────────────────────────────────────────────────────────────────
+STATE_DIR="$LOG_DIR"
+SEEN_DB="$STATE_DIR/seen.txt"
+touch "$SEEN_DB"
+log_info "State database: $SEEN_DB ($(wc -l < "$SEEN_DB" | tr -d ' ') entries)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FILE HANDLING FUNCTIONS
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Wait until file size stabilizes (for files still being written)
+wait_for_stable() {
+  local f="$1"
+  local max_attempts=10
+  local attempt=0
+  local s1 s2
+
+  if [[ ! -f "$f" ]]; then
+    log_warn "wait_for_stable: File does not exist: $f"
+    return 1
+  fi
+
+  while (( attempt < max_attempts )); do
+    s1=$($STAT -f%z "$f" 2>/dev/null || $ECHO -1)
+    if [[ "$s1" == "-1" ]]; then
+      log_warn "wait_for_stable: Cannot stat file: $f"
+      return 1
+    fi
+
+    $SLEEP 1
+
+    s2=$($STAT -f%z "$f" 2>/dev/null || $ECHO -1)
+    if [[ "$s2" == "-1" ]]; then
+      log_warn "wait_for_stable: File disappeared while waiting: $f"
+      return 1
+    fi
+
+    if [[ "$s1" -ne 0 && "$s1" -eq "$s2" ]]; then
+      log_debug "File stable at ${s2} bytes after $((attempt + 1)) check(s): $($BASENAME "$f")"
+      return 0
+    fi
+
+    log_debug "File still changing (${s1} -> ${s2}): $($BASENAME "$f")"
+    (( attempt++ ))
+  done
+
+  log_warn "File did not stabilize after $max_attempts attempts: $f"
+  return 1
+}
+
+copy_one() {
+  local src="$1"
+
+  log_debug "Processing event for: $src"
+
+  # Check if file exists
+  if [[ ! -f "$src" ]]; then
+    log_debug "Skipping (not a file or doesn't exist): $src"
+    return 0
+  fi
+
+  # Verify it's under originals/
+  if [[ "$src" != "$ORIG/"* ]]; then
+    log_debug "Skipping (not under originals): $src"
+    return 0
+  fi
+
+  # Skip hidden files and temp files
+  local filename="$($BASENAME "$src")"
+  if [[ "$filename" == .* ]] || [[ "$filename" == *".tmp" ]] || [[ "$filename" == *".partial" ]]; then
+    log_debug "Skipping (hidden or temp file): $filename"
+    return 0
+  fi
+
+  # Build dedup key
+  local sz mt key
+  sz=$($STAT -f%z "$src" 2>/dev/null || $ECHO 0)
+  mt=$($STAT -f%m "$src" 2>/dev/null || $ECHO 0)
+  key="${src}::${sz}::${mt}"
+
+  # Check if already processed
+  if $GREP -Fqx "$key" "$SEEN_DB" 2>/dev/null; then
+    log_debug "Skipping (already copied): $($BASENAME "$src")"
+    return 0
+  fi
+
+  log_info "New file detected: $($BASENAME "$src") (${sz} bytes)"
+
+  # Wait for file to finish writing
+  if ! wait_for_stable "$src"; then
+    log_warn "Skipping unstable file: $src"
+    return 0
+  fi
+
+  # Determine output path (handle collisions)
+  local base out ext name i
+  base="$($BASENAME -- "$src")"
+  out="$DEST/$base"
+
+  if [[ -e "$out" ]]; then
+    name="${base%.*}"
+    ext=""
+    [[ "$base" == *.* ]] && ext=".${base##*.}"
+    i=1
+    while [[ -e "$DEST/${name}_$i$ext" ]]; do
+      (( i++ ))
+    done
+    out="$DEST/${name}_$i$ext"
+    log_info "Filename collision, using: $($BASENAME "$out")"
+  fi
+
+  # Perform the copy using cp (rsync has PATH issues in subshell context)
+  log_info "Copying: $($BASENAME "$src") -> $out"
+  if $CP -p "$src" "$out" 2>&1; then
+    $ECHO "$key" >> "$SEEN_DB"
+    log_info "SUCCESS: Copied $($BASENAME "$src")"
+  else
+    log_error "FAILED: cp error copying $($BASENAME "$src")"
+    return 1
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN LOOP
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "╔══════════════════════════════════════════════════════════════════════╗"
+echo "║  Photos Tether Debug Mode                                            ║"
+echo "╠══════════════════════════════════════════════════════════════════════╣"
+echo "║  Watching: $ORIG"
+echo "║  Copying to: $DEST"
+echo "║  Log file: $LOG_FILE"
+echo "╠══════════════════════════════════════════════════════════════════════╣"
+echo "║  Press Ctrl+C to stop                                                ║"
+echo "╚══════════════════════════════════════════════════════════════════════╝"
+echo ""
+
+log_info "════════════════════════════════════════════════════════════════"
+log_info "Session started"
+log_info "════════════════════════════════════════════════════════════════"
+
+# Optional initial sync (comment out if you only want new files)
+log_info "Running initial sync of existing files..."
+if rsync -av --ignore-existing "$ORIG"/ "$DEST"/ 2>&1 | grep -v "^$" | while read line; do log_debug "initial rsync: $line"; done; then
+  log_info "Initial sync complete"
+else
+  log_warn "Initial sync had issues (may be normal if empty)"
+fi
+
+# Start the file watcher
+log_info "Starting fswatch on: $ORIG"
+log_info "Listening for: Created, Updated, Renamed, MovedTo, CloseWrite events"
+
+# Test that fswatch can access the directory
+log_debug "Testing fswatch access..."
+fswatch -r --event Created "$ORIG" &
+FSWATCH_PID=$!
+sleep 2
+if kill -0 $FSWATCH_PID 2>/dev/null; then
+  kill $FSWATCH_PID 2>/dev/null || true
+  wait $FSWATCH_PID 2>/dev/null || true
+  log_info "fswatch access test passed"
+else
+  log_warn "fswatch test process ended early - may be normal, continuing..."
+fi
+
+# Main watch loop - using process substitution to avoid subshell PATH issues
+while IFS= read -r path; do
+  if [[ "$path" == *"error"* ]] || [[ "$path" == *"Error"* ]]; then
+    log_error "fswatch error: $path"
+  else
+    log_debug "fswatch event: $path"
+    copy_one "$path"
+  fi
+done < <(fswatch -r \
+  --event Created \
+  --event Updated \
+  --event Renamed \
+  --event MovedTo \
+  --event CloseWrite \
+  --latency=0.5 \
+  "$ORIG" 2>&1)
+
+log_info "Watcher stopped"
