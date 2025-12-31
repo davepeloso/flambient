@@ -132,14 +132,14 @@ class HomeCommand extends Command
             $choice = select(
                 label: '🏠 Main Menu',
                 options: [
-                    'process' => '🖼️  Image Processing',
-                    'imagen' => '☁️  Imagen AI Integration',
-                    'database' => '📊 Database & Jobs',
-                    'tether' => '📷 Camera Tethering & Import',
-                    'manual' => '📖 Manual & Documentation',
-                    'debug' => '🔧 Debug & Diagnostics',
-                    'settings' => '⚙️  Settings & Configuration',
-                    'quit' => '🚪 Exit Application',
+                    'process' => 'Image Processing',
+                    'imagen' => 'Imagen AI Integration',
+                    'database' => 'Database & Jobs',
+                    'tether' => 'Camera Tethering & Import',
+                    'manual' => 'Manual & Documentation',
+                    'debug' => 'Debug & Diagnostics',
+                    'settings' => '⚙️ Settings & Configuration',
+                    'quit' => 'Exit Application',
                 ],
                 default: 'process',
                 hint: 'Use arrow keys to navigate, Enter to select'
@@ -165,15 +165,15 @@ class HomeCommand extends Command
     private function imageProcessingMenu(): void
     {
         $choice = select(
-            label: '🖼️  Image Processing',
+            label: 'Image Processing',
             options: [
-                'flambient' => '🔥 Run Flambient Workflow',
-                'upload' => '📤 Upload & Extract EXIF',
-                'classify' => '🏷️  Classify Exposure Stacks',
-                'generate' => '📝 Generate ImageMagick Scripts',
-                'execute' => '▶️  Execute Processing Scripts',
-                'reprocess' => '🔄 Reprocess EXIF Data',
-                'browse' => '📁 Browse Output Folders',
+                'flambient' => 'Run Flambient Workflow',
+                'upload' => 'Upload & Extract EXIF',
+                'classify' => 'Classify Exposure Stacks',
+                'generate' => 'Generate ImageMagick Scripts',
+                'execute' => 'Execute Processing Scripts',
+                'reprocess' => 'Reprocess EXIF Data',
+                'browse' => 'Browse Output Folders',
                 'back' => '← Back to Main Menu',
             ],
             hint: 'Select a processing operation'
@@ -199,17 +199,26 @@ class HomeCommand extends Command
                 'local' => 'Local Only (ImageMagick blending)',
                 'full' => 'Full Workflow (with Imagen AI)',
                 'interactive' => 'Interactive (guided prompts)',
+                'back' => '← Back',
+                'home' => '🏠 Main Menu',
             ]
         );
+
+        if ($mode === 'back' || $mode === 'home') {
+            return;
+        }
 
         $flags = match ($mode) {
             'local' => '--local',
             'full' => '',
             'interactive' => '',
+            default => '',
         };
 
         info('Starting Flambient workflow...');
         $this->call('flambient:process', $flags ? ['--local' => true] : []);
+
+        $this->showEndNavigation('imageProcessingMenu');
     }
 
     private function runUploadWorkflow(): void
@@ -217,10 +226,12 @@ class HomeCommand extends Command
         info('Opening web upload interface...');
         $url = config('app.url') . '/upload';
         note("Navigate to: {$url}");
-        
+
         if (confirm('Open in browser?', default: true)) {
             Process::run("open '{$url}'");
         }
+
+        $this->showEndNavigation('imageProcessingMenu');
     }
 
     private function runClassifyWorkflow(): void
@@ -228,71 +239,99 @@ class HomeCommand extends Command
         info('Opening cull/classify interface...');
         $url = config('app.url') . '/cull';
         note("Navigate to: {$url}");
-        
+
         if (confirm('Open in browser?', default: true)) {
             Process::run("open '{$url}'");
         }
+
+        $this->showEndNavigation('imageProcessingMenu');
     }
 
     private function runGenerateScripts(): void
     {
         $batches = Batch::where('status', 'pending')->orWhere('status', 'classified')->get();
-        
+
         if ($batches->isEmpty()) {
             warning('No batches ready for script generation.');
             note('Upload and classify images first.');
+            $this->showEndNavigation('imageProcessingMenu');
             return;
         }
 
+        $options = $batches->mapWithKeys(fn($b) => [
+            $b->id => substr($b->id, 0, 8) . "... ({$b->image_count} images)"
+        ])->toArray();
+        $options['back'] = '← Back';
+        $options['home'] = '🏠 Main Menu';
+
         $selected = select(
             label: 'Select batch for script generation',
-            options: $batches->mapWithKeys(fn($b) => [
-                $b->id => substr($b->id, 0, 8) . "... ({$b->image_count} images)"
-            ])->toArray()
+            options: $options
         );
+
+        if ($selected === 'back' || $selected === 'home') {
+            return;
+        }
 
         info("Generating scripts for batch: {$selected}");
         warning('Script generation command not yet fully implemented.');
         note('This will generate ImageMagick .mgk scripts based on your exposure stacks.');
+
+        $this->showEndNavigation('imageProcessingMenu');
     }
 
     private function runExecuteScripts(): void
     {
         $scriptDir = storage_path('flambient');
-        
+
         if (!is_dir($scriptDir)) {
             warning('No processing scripts found.');
             note('Generate scripts first via Image Processing → Generate ImageMagick Scripts');
+            $this->showEndNavigation('imageProcessingMenu');
             return;
         }
 
         $projects = collect(File::directories($scriptDir))->map(fn($p) => basename($p));
-        
+
         if ($projects->isEmpty()) {
             warning('No project folders found.');
+            $this->showEndNavigation('imageProcessingMenu');
             return;
         }
 
+        $options = $projects->combine($projects)->toArray();
+        $options['back'] = '← Back';
+        $options['home'] = '🏠 Main Menu';
+
         $selected = select(
             label: 'Select project to execute scripts',
-            options: $projects->combine($projects)->toArray()
+            options: $options
         );
+
+        if ($selected === 'back' || $selected === 'home') {
+            return;
+        }
 
         info("Executing scripts for: {$selected}");
         warning('Script execution command not yet fully implemented.');
+
+        $this->showEndNavigation('imageProcessingMenu');
     }
 
     private function browseOutputFolders(): void
     {
         $outputDir = storage_path('flambient');
-        
+
         if (!is_dir($outputDir)) {
             warning('No output folders exist yet.');
+            $this->showEndNavigation('imageProcessingMenu');
             return;
         }
 
         info("Opening: {$outputDir}");
         Process::run("open '{$outputDir}'");
+
+        $this->showEndNavigation('imageProcessingMenu');
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -311,16 +350,16 @@ class HomeCommand extends Command
         }
 
         $choice = select(
-            label: '☁️  Imagen AI Integration',
+            label: 'Imagen AI Integration',
             options: [
-                'profiles' => '📋 List Available Profiles',
-                'projects' => '📁 View Recent Projects',
-                'status' => '🔍 Check Job Status (by UUID)',
-                'local_jobs' => '💾 View Local Job Records',
-                'upload' => '📤 Upload to Imagen',
-                'export' => '📥 Export & Download Results',
-                'config' => '⚙️  View Imagen Config',
-                'api_test' => '🧪 Test API Endpoints',
+                'profiles' => 'List Available Profiles',
+                'projects' => 'View Recent Projects',
+                'status' => 'Check Job Status (by UUID)',
+                'local_jobs' => 'View Local Job Records',
+                'upload' => 'Upload to Imagen',
+                'export' => 'Export & Download Results',
+                'config' => '⚙️ View Imagen Config',
+                'api_test' => 'Test API Endpoints',
                 'back' => '← Back to Main Menu',
             ],
         );
@@ -359,8 +398,8 @@ class HomeCommand extends Command
                     'Key' => $profile['profile_key'] ?? 'N/A',
                     'Name' => $profile['profile_name'] ?? 'Unnamed',
                     'Type' => $profile['photography_type'] ?? 'Unknown',
-                    'Created' => isset($profile['created_at']) 
-                        ? date('Y-m-d', strtotime($profile['created_at'])) 
+                    'Created' => isset($profile['created_at'])
+                        ? date('Y-m-d', strtotime($profile['created_at']))
                         : 'N/A',
                 ];
             })->toArray();
@@ -371,6 +410,8 @@ class HomeCommand extends Command
             error('Failed to fetch profiles.');
             $this->line('Response: ' . json_encode($result));
         }
+
+        $this->showEndNavigation('imagenMenu');
     }
 
     private function listImagenProjects(): void
@@ -398,14 +439,14 @@ class HomeCommand extends Command
                     'pending' => '🕐',
                     default => '❓'
                 };
-                
+
                 return [
                     'UUID' => substr($project['project_uuid'] ?? '', 0, 8) . '...',
                     'Name' => substr($project['project_name'] ?? 'Unnamed', 0, 25),
                     'Status' => $statusIcon . ' ' . $status,
                     'Images' => $project['number_of_photos'] ?? 0,
-                    'Created' => isset($project['created_at']) 
-                        ? date('Y-m-d H:i', strtotime($project['created_at'])) 
+                    'Created' => isset($project['created_at'])
+                        ? date('Y-m-d H:i', strtotime($project['created_at']))
                         : 'N/A',
                 ];
             })->toArray();
@@ -415,18 +456,26 @@ class HomeCommand extends Command
         } else {
             warning('No projects found or API returned unexpected format.');
         }
+
+        $this->showEndNavigation('imagenMenu');
     }
 
     private function checkImagenJobStatus(): void
     {
         $uuid = text(
-            label: 'Enter Project UUID',
+            label: 'Enter Project UUID (or leave empty to go back)',
             placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
-            required: true,
-            validate: fn($v) => strlen($v) < 10 ? 'UUID too short' : null
+            required: false,
+            validate: fn($v) => $v && strlen($v) < 10 ? 'UUID too short' : null
         );
 
+        if (empty($uuid)) {
+            return;
+        }
+
         $this->fetchAndDisplayProjectStatus($uuid);
+
+        $this->showEndNavigation('imagenMenu');
     }
 
     private function fetchAndDisplayProjectStatus(string $uuid): void
@@ -458,7 +507,7 @@ class HomeCommand extends Command
 
         $this->line('');
         $this->line('<fg=cyan>═══════════════════════════════════════════════════════════</>');
-        $this->line('<fg=yellow>  PROJECT DETAILS</>');
+        $this->line('<fg=yellow>PROJECT DETAILS</>');
         $this->line('<fg=cyan>═══════════════════════════════════════════════════════════</>');
         
         if (isset($projectResult['data'])) {
@@ -489,10 +538,11 @@ class HomeCommand extends Command
         // Check if imagen_jobs table exists
         try {
             $jobs = DB::table('imagen_jobs')->latest()->take(20)->get();
-            
+
             if ($jobs->isEmpty()) {
                 warning('No local Imagen job records found.');
                 note('Jobs are recorded when you process images through the workflow.');
+                $this->showEndNavigation('imagenMenu');
                 return;
             }
 
@@ -515,14 +565,18 @@ class HomeCommand extends Command
             })->toArray();
 
             table(['ID', 'UUID', 'Status', 'Images', 'Created'], $data);
-            
+
+            $this->showEndNavigation('imagenMenu');
+
         } catch (\Exception $e) {
             warning('Imagen jobs table not found in database.');
             note('The imagen_jobs table may not have been created yet.');
             note('Run migrations or the first Imagen workflow to create it.');
-            
+
             if (confirm('View standard Laravel jobs queue instead?')) {
                 $this->viewJobs();
+            } else {
+                $this->showEndNavigation('imagenMenu');
             }
         }
     }
@@ -530,17 +584,25 @@ class HomeCommand extends Command
     private function uploadToImagen(): void
     {
         $folders = $this->getOutputFolders();
-        
+
         if (empty($folders)) {
             warning('No processed folders available for upload.');
             note('Run the Flambient workflow first to generate blended images.');
+            $this->showEndNavigation('imagenMenu');
             return;
         }
+
+        $folders['back'] = '← Back';
+        $folders['home'] = '🏠 Main Menu';
 
         $selected = select(
             label: 'Select folder to upload',
             options: $folders
         );
+
+        if ($selected === 'back' || $selected === 'home') {
+            return;
+        }
 
         $profileKey = text(
             label: 'Imagen Profile Key',
@@ -549,6 +611,7 @@ class HomeCommand extends Command
         );
 
         if (!confirm("Upload images from {$selected} using profile {$profileKey}?")) {
+            $this->showEndNavigation('imagenMenu');
             return;
         }
 
@@ -556,15 +619,21 @@ class HomeCommand extends Command
         warning('Full upload implementation requires ImagenClient service.');
         note("Would upload from: {$selected}");
         note("With profile: {$profileKey}");
+
+        $this->showEndNavigation('imagenMenu');
     }
 
     private function exportFromImagen(): void
     {
         $uuid = text(
-            label: 'Enter Project UUID to export',
+            label: 'Enter Project UUID to export (or leave empty to go back)',
             placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
-            required: true
+            required: false
         );
+
+        if (empty($uuid)) {
+            return;
+        }
 
         $apiKey = $this->getImagenApiKey();
         $baseUrl = $this->getImagenBaseUrl();
@@ -583,7 +652,7 @@ class HomeCommand extends Command
         if ($result->successful()) {
             info('✓ Export triggered successfully!');
             note('Wait a moment, then use the API to fetch download links.');
-            
+
             if (confirm('Fetch download links now? (Wait 10 seconds)')) {
                 sleep(10);
                 $this->fetchExportLinks($uuid);
@@ -591,6 +660,8 @@ class HomeCommand extends Command
         } else {
             error('Export failed: ' . $result->body());
         }
+
+        $this->showEndNavigation('imagenMenu');
     }
 
     private function fetchExportLinks(string $uuid): void
@@ -629,7 +700,7 @@ class HomeCommand extends Command
         $config = [
             ['Setting', 'Value', 'Status'],
             [
-                'API Key', 
+                'API Key',
                 env('IMAGEN_AI_API_KEY') ? '••••••' . substr(env('IMAGEN_AI_API_KEY'), -4) : 'Not Set',
                 env('IMAGEN_AI_API_KEY') ? '✓' : '✗'
             ],
@@ -641,6 +712,8 @@ class HomeCommand extends Command
         ];
 
         table(['Setting', 'Value', 'Status'], array_slice($config, 1));
+
+        $this->showEndNavigation('imagenMenu');
     }
 
     private function testImagenApiEndpoints(): void
@@ -652,10 +725,13 @@ class HomeCommand extends Command
                 'projects' => 'GET /projects/ - List projects',
                 'account' => 'GET /account/ - Account info',
                 'back' => '← Back',
+                'home' => '🏠 Main Menu',
             ]
         );
 
-        if ($endpoints === 'back') return;
+        if ($endpoints === 'back' || $endpoints === 'home') {
+            return;
+        }
 
         $apiKey = $this->getImagenApiKey();
         $baseUrl = $this->getImagenBaseUrl();
@@ -688,10 +764,12 @@ class HomeCommand extends Command
         $this->line('');
         $this->line('<fg=yellow>Response Body (truncated):</>');
         $this->line(substr(json_encode($result['body'], JSON_PRETTY_PRINT), 0, 1000));
-        
+
         if (strlen(json_encode($result['body'])) > 1000) {
             note('... response truncated for display');
         }
+
+        $this->showEndNavigation('imagenMenu');
     }
 
     private function getImagenApiKey(): string
@@ -726,15 +804,15 @@ class HomeCommand extends Command
         $choice = select(
             label: '📊 Database & Jobs',
             options: [
-                'stats' => '📈 Database Statistics',
-                'batches' => '📦 View Batches',
-                'images' => '🖼️  View Images',
-                'stacks' => '📚 View Exposure Stacks',
-                'jobs' => '⚙️  View Laravel Jobs Queue',
-                'query' => '🔍 Run Custom Query (SELECT only)',
-                'tables' => '📋 List All Tables',
-                'browse' => '📂 Open Database File',
-                'back' => '← Back to Main Menu',
+                'stats' => 'Database Statistics',
+                'batches' => 'View Batches',
+                'images' => 'View Images',
+                'stacks' => 'View Exposure Stacks',
+                'jobs' => 'View Laravel Jobs Queue',
+                'query' => 'Run Custom Query (SELECT only)',
+                'tables' => 'List All Tables',
+                'browse' => 'Open Database File',
+                'back' => 'Back to Main Menu',
             ],
         );
 
@@ -777,7 +855,7 @@ class HomeCommand extends Command
         }
 
         table(['Table', 'Records', 'Status'], array_slice($stats, 1));
-        
+
         // Show database file info
         $dbPath = database_path('database.sqlite');
         if (file_exists($dbPath)) {
@@ -786,6 +864,8 @@ class HomeCommand extends Command
             note('Size: ' . $this->formatBytes(filesize($dbPath)));
             note('Modified: ' . date('Y-m-d H:i:s', filemtime($dbPath)));
         }
+
+        $this->showEndNavigation('databaseMenu');
     }
 
     private function viewBatches(): void
@@ -794,6 +874,7 @@ class HomeCommand extends Command
 
         if ($batches->isEmpty()) {
             warning('No batches found.');
+            $this->showEndNavigation('databaseMenu');
             return;
         }
 
@@ -817,20 +898,28 @@ class HomeCommand extends Command
         })->toArray();
 
         table(['ID', 'Status', 'Images', 'Size', 'Created'], $data);
+
+        $this->showEndNavigation('databaseMenu');
     }
 
     private function viewImages(): void
     {
         $limit = text(
-            label: 'How many images to show?',
+            label: 'How many images to show? (or leave empty to go back)',
             default: '20',
-            validate: fn($v) => is_numeric($v) ? null : 'Must be a number'
+            required: false,
+            validate: fn($v) => $v && !is_numeric($v) ? 'Must be a number' : null
         );
+
+        if (empty($limit)) {
+            return;
+        }
 
         $images = Image::with('metadata')->latest()->take((int)$limit)->get();
 
         if ($images->isEmpty()) {
             warning('No images found.');
+            $this->showEndNavigation('databaseMenu');
             return;
         }
 
@@ -852,6 +941,8 @@ class HomeCommand extends Command
         })->toArray();
 
         table(['Filename', 'Flash', 'ISO', 'Tag', 'Size'], $data);
+
+        $this->showEndNavigation('databaseMenu');
     }
 
     private function viewStacks(): void
@@ -860,6 +951,7 @@ class HomeCommand extends Command
 
         if ($stacks->isEmpty()) {
             warning('No exposure stacks found.');
+            $this->showEndNavigation('databaseMenu');
             return;
         }
 
@@ -874,6 +966,8 @@ class HomeCommand extends Command
         })->toArray();
 
         table(['ID', 'Batch', 'Flash', 'Ambient', 'Status'], $data);
+
+        $this->showEndNavigation('databaseMenu');
     }
 
     private function viewJobs(): void
@@ -883,7 +977,7 @@ class HomeCommand extends Command
 
             if ($jobs->isEmpty()) {
                 warning('No pending jobs in queue.');
-                
+
                 // Check failed jobs
                 try {
                     $failedCount = DB::table('failed_jobs')->count();
@@ -891,7 +985,8 @@ class HomeCommand extends Command
                         note("There are {$failedCount} failed jobs. Run 'php artisan queue:failed' to view.");
                     }
                 } catch (\Exception $e) {}
-                
+
+                $this->showEndNavigation('databaseMenu');
                 return;
             }
 
@@ -907,21 +1002,29 @@ class HomeCommand extends Command
             })->toArray();
 
             table(['ID', 'Queue', 'Job', 'Attempts', 'Created'], $data);
+
+            $this->showEndNavigation('databaseMenu');
         } catch (\Exception $e) {
             warning('Jobs table not found. Run: php artisan queue:table && php artisan migrate');
+            $this->showEndNavigation('databaseMenu');
         }
     }
 
     private function runRawQuery(): void
     {
         $query = text(
-            label: 'Enter SQL Query (SELECT only)',
+            label: 'Enter SQL Query (SELECT only, or leave empty to go back)',
             placeholder: 'SELECT * FROM flambient_batches LIMIT 5',
-            required: true,
+            required: false,
         );
+
+        if (empty($query)) {
+            return;
+        }
 
         if (!str_starts_with(strtoupper(trim($query)), 'SELECT')) {
             error('Only SELECT queries are allowed for safety.');
+            $this->showEndNavigation('databaseMenu');
             return;
         }
 
@@ -930,9 +1033,10 @@ class HomeCommand extends Command
                 callback: fn() => DB::select($query),
                 message: 'Executing query...'
             );
-            
+
             if (empty($results)) {
                 warning('Query returned no results.');
+                $this->showEndNavigation('databaseMenu');
                 return;
             }
 
@@ -948,8 +1052,11 @@ class HomeCommand extends Command
 
             table($headers, $data);
             note('Returned ' . count($results) . ' rows');
+
+            $this->showEndNavigation('databaseMenu');
         } catch (\Exception $e) {
             error('Query error: ' . $e->getMessage());
+            $this->showEndNavigation('databaseMenu');
         }
     }
 
@@ -957,7 +1064,7 @@ class HomeCommand extends Command
     {
         try {
             $tables = DB::select("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name");
-            
+
             $data = collect($tables)->map(function ($table) {
                 $count = DB::table($table->name)->count();
                 return [
@@ -967,17 +1074,21 @@ class HomeCommand extends Command
             })->toArray();
 
             table(['Table', 'Records'], $data);
+
+            $this->showEndNavigation('databaseMenu');
         } catch (\Exception $e) {
             error('Error listing tables: ' . $e->getMessage());
+            $this->showEndNavigation('databaseMenu');
         }
     }
 
     private function openDatabaseFile(): void
     {
         $dbPath = database_path('database.sqlite');
-        
+
         if (!file_exists($dbPath)) {
             warning('SQLite database file not found.');
+            $this->showEndNavigation('databaseMenu');
             return;
         }
 
@@ -987,16 +1098,23 @@ class HomeCommand extends Command
                 'finder' => 'Show in Finder',
                 'tableplus' => 'Open in TablePlus',
                 'sqlite' => 'Open in sqlite3 CLI',
-                'back' => '← Back'
+                'back' => '← Back',
+                'home' => '🏠 Main Menu',
             ]
         );
+
+        if ($choice === 'back' || $choice === 'home') {
+            return;
+        }
 
         match ($choice) {
             'finder' => Process::run("open -R '{$dbPath}'"),
             'tableplus' => Process::run("open -a TablePlus '{$dbPath}'"),
             'sqlite' => $this->runSqliteCli($dbPath),
-            'back' => null,
+            default => null,
         };
+
+        $this->showEndNavigation('databaseMenu');
     }
 
     private function runSqliteCli(string $dbPath): void
@@ -1014,13 +1132,13 @@ class HomeCommand extends Command
         $choice = select(
             label: '📷 Camera Tethering & Import',
             options: [
-                'live' => '📷 Live Capture (photos-capture-live)',
-                'sync' => '🔄 Sync from Photos.app (photos-capture-sync)',
-                'debug' => '🐛 Debug Tethering (photos-tether-debug)',
-                'status' => '❓ Check Photos.app Status',
-                'import' => '📥 Import from Folder',
-                'help' => '📖 Tethering Help & Requirements',
-                'back' => '← Back to Main Menu',
+                'live' => 'Live Capture (photos-capture-live)',
+                'sync' => 'Sync from Photos.app (photos-capture-sync)',
+                'debug' => 'Debug Tethering (photos-tether-debug)',
+                'status' => 'Check Photos.app Status',
+                'import' => 'Import from Folder',
+                'help' => 'Tethering Help & Requirements',
+                'back' => 'Back to Main Menu',
             ],
         );
 
@@ -1047,10 +1165,12 @@ class HomeCommand extends Command
             note('  - photos-capture-sync');
             note('  - photos-tether-debug');
             $this->line('');
-            
+
             if (confirm('Create placeholder script?')) {
                 $this->createPlaceholderScript($scriptPath, $script);
             }
+
+            $this->showEndNavigation('tetheringMenu');
             return;
         }
 
@@ -1062,22 +1182,24 @@ class HomeCommand extends Command
         $this->line('');
         info("Running: {$script}");
         $this->line('<fg=gray>─────────────────────────────────────────────</>');
-        
+
         $result = Process::timeout(300)->run($scriptPath);
-        
+
         $this->line($result->output());
-        
+
         if ($result->errorOutput()) {
             $this->line('<fg=red>' . $result->errorOutput() . '</>');
         }
-        
+
         $this->line('<fg=gray>─────────────────────────────────────────────</>');
-        
+
         if ($result->failed()) {
             error('Script failed with exit code: ' . $result->exitCode());
         } else {
             info('Script completed successfully.');
         }
+
+        $this->showEndNavigation('tetheringMenu');
     }
 
     private function createPlaceholderScript(string $path, string $name): void
@@ -1136,45 +1258,54 @@ BASH;
         }
 
         $this->line('');
-        
+
         if (!$photosResult->successful()) {
             if (confirm('Open Photos.app?')) {
                 Process::run('open -a Photos');
                 info('Photos.app launched');
             }
         }
+
+        $this->showEndNavigation('tetheringMenu');
     }
 
     private function importFromFolder(): void
     {
         $path = text(
-            label: 'Enter folder path to import from',
+            label: 'Enter folder path to import from (or leave empty to go back)',
             placeholder: '/Users/you/Pictures/CameraImport',
-            required: true,
-            validate: fn($v) => is_dir($v) ? null : 'Directory does not exist'
+            required: false,
+            validate: fn($v) => $v && !is_dir($v) ? 'Directory does not exist' : null
         );
 
+        if (empty($path)) {
+            return;
+        }
+
         $files = glob("{$path}/*.{jpg,jpeg,JPG,JPEG}", GLOB_BRACE);
-        
+
         if (empty($files)) {
             warning('No JPEG files found in that directory.');
+            $this->showEndNavigation('tetheringMenu');
             return;
         }
 
         info('Found ' . count($files) . ' JPEG files.');
-        
+
         if (confirm('Import these files to a new batch?')) {
             // This would integrate with your upload controller
             warning('Batch import not yet integrated with CLI.');
             note('Use the web interface at: ' . config('app.url') . '/upload');
         }
+
+        $this->showEndNavigation('tetheringMenu');
     }
 
     private function showTetheringHelp(): void
     {
         $this->line('');
         $this->line('<fg=cyan>═══════════════════════════════════════════════════════════</>');
-        $this->line('<fg=yellow>  📷 CAMERA TETHERING & IMPORT GUIDE</>');
+        $this->line('<fg=yellow>CAMERA TETHERING & IMPORT GUIDE</>');
         $this->line('<fg=cyan>═══════════════════════════════════════════════════════════</>');
         $this->line('');
         $this->line('<fg=white>Available Scripts (in resources/exe/):</>');
@@ -1207,6 +1338,8 @@ BASH;
         $this->line('<fg=white>Alternative: Direct Import</>');
         $this->line('  Use "Import from Folder" to batch import from any directory.');
         $this->line('');
+
+        $this->showEndNavigation('tetheringMenu');
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1218,16 +1351,16 @@ BASH;
         $choice = select(
             label: '📖 Manual & Documentation',
             options: [
-                'overview' => '🏠 Application Overview',
-                'quickstart' => '🚀 Quick Start Guide',
-                'dmec' => '💡 D-MEC Theory & Background',
-                'workflow' => '📋 Processing Workflow Guide',
-                'imagemagick' => '🪄 ImageMagick Reference',
-                'imagen' => '☁️  Imagen AI Integration Guide',
-                'troubleshoot' => '🔧 Troubleshooting Guide',
-                'faq' => '❓ Frequently Asked Questions',
-                'changelog' => '📝 Version History',
-                'back' => '← Back to Main Menu',
+                'overview' => 'Application Overview',
+                'quickstart' => 'Quick Start Guide',
+                'dmec' => 'D-MEC Theory & Background',
+                'workflow' => 'Processing Workflow Guide',
+                'imagemagick' => 'ImageMagick Reference',
+                'imagen' => 'Imagen AI Integration Guide',
+                'troubleshoot' => 'Troubleshooting Guide',
+                'faq' => 'Frequently Asked Questions',
+                'changelog' => 'Version History',
+                'back' => '←Back to Main Menu',
             ],
         );
 
@@ -1276,10 +1409,8 @@ BASH;
         $this->line('  • ImageMagick 7+ for image processing');
         $this->line('  • ExifTool for metadata extraction');
         $this->line('');
-        
-        if (confirm('View Quick Start guide?')) {
-            $this->showQuickStart();
-        }
+
+        $this->showEndNavigation('manualMenu');
     }
 
     private function showQuickStart(): void
@@ -1311,6 +1442,8 @@ BASH;
         $this->line('');
         $this->line('<fg=white>For interactive mode, just run:</> <fg=yellow>php artisan home</>');
         $this->line('');
+
+        $this->showEndNavigation('manualMenu');
     }
 
     private function showDMECTheory(): void
@@ -1353,6 +1486,8 @@ BASH;
         $this->line('  <fg=cyan>Focus Stack</>   - Multiple focus points for depth of field');
         $this->line('  <fg=cyan>Time Blend</>    - Day/dusk/night for twilight shots');
         $this->line('');
+
+        $this->showEndNavigation('manualMenu');
     }
 
     private function showWorkflowGuide(): void
@@ -1396,6 +1531,8 @@ BASH;
         $this->line('  ├─ Organize output folders');
         $this->line('  └─ Export/upload to client');
         $this->line('');
+
+        $this->showEndNavigation('manualMenu');
     }
 
     private function showImageMagickGuide(): void
@@ -1443,13 +1580,15 @@ BASH;
         $this->line('  • Memory errors - Add: -limit memory 2GB');
         $this->line('  • Slow processing - Use -quality 92 not 100');
         $this->line('');
+
+        $this->showEndNavigation('manualMenu');
     }
 
     private function showImagenGuide(): void
     {
         $this->line('');
         $this->line('<fg=cyan>═══════════════════════════════════════════════════════════</>');
-        $this->line('<fg=yellow>  ☁️  IMAGEN AI INTEGRATION GUIDE</>');
+        $this->line('<fg=yellow>IMAGEN AI INTEGRATION GUIDE</>');
         $this->line('<fg=cyan>═══════════════════════════════════════════════════════════</>');
         $this->line('');
         $this->line('<fg=green>What is Imagen AI?</>');
@@ -1481,6 +1620,8 @@ BASH;
         $this->line('  has a unique key that you specify when starting edits.');
         $this->line('  Use "List Available Profiles" to see your profiles.');
         $this->line('');
+
+        $this->showEndNavigation('manualMenu');
     }
 
     private function showTroubleshooting(): void
@@ -1541,6 +1682,8 @@ BASH;
         $this->line('  2. Check database.sqlite exists');
         $this->line('  3. Verify DB_CONNECTION=sqlite in .env');
         $this->line('');
+
+        $this->showEndNavigation('manualMenu');
     }
 
     private function showFAQ(): void
@@ -1577,6 +1720,8 @@ BASH;
         $this->line('A: In storage/flambient/{project-name}/flambient/');
         $this->line('   Edited images go to /edited/ subfolder.');
         $this->line('');
+
+        $this->showEndNavigation('manualMenu');
     }
 
     private function showChangelog(): void
@@ -1605,6 +1750,8 @@ BASH;
         $this->line('  • AWK-based script generation');
         $this->line('  • Manual curl-based API calls');
         $this->line('');
+
+        $this->showEndNavigation('manualMenu');
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1616,15 +1763,15 @@ BASH;
         $choice = select(
             label: '🔧 Debug & Diagnostics',
             options: [
-                'health' => '❤️  System Health Check',
-                'env' => '📋 Environment Variables',
-                'api' => '🌐 Test API Connections',
-                'deps' => '📦 Check Dependencies',
-                'logs' => '📜 View Recent Logs',
-                'clear' => '🧹 Clear Caches',
-                'routes' => '🛤️  List Artisan Commands',
-                'phpinfo' => '🐘 PHP Info',
-                'back' => '← Back to Main Menu',
+                'health' => '❤️ System Health Check',
+                'env' => 'Environment Variables',
+                'api' => 'Test API Connections',
+                'deps' => 'Check Dependencies',
+                'logs' => 'View Recent Logs',
+                'clear' => 'Clear Caches',
+                'routes' => 'List Artisan Commands',
+                'phpinfo' => 'PHP Info',
+                'back' => '←Back to Main Menu',
             ],
         );
 
@@ -1698,6 +1845,8 @@ BASH;
         } else {
             warning('Some issues detected. Review the items marked with ✗');
         }
+
+        $this->showEndNavigation('debugMenu');
     }
 
     private function showEnvironment(): void
@@ -1721,6 +1870,8 @@ BASH;
         ];
 
         table(['Category', 'Key', 'Value'], array_slice($env, 1));
+
+        $this->showEndNavigation('debugMenu');
     }
 
     private function testAllConnections(): void
@@ -1780,13 +1931,15 @@ BASH;
         }
 
         $this->line('');
+
+        $this->showEndNavigation('debugMenu');
     }
 
     private function checkDependencies(): void
     {
         $this->line('');
         $this->line('<fg=cyan>═══════════════════════════════════════════════════════════</>');
-        $this->line('<fg=yellow>  📦 DEPENDENCY CHECK</>');
+        $this->line('<fg=yellow> DEPENDENCY CHECK</>');
         $this->line('<fg=cyan>═══════════════════════════════════════════════════════════</>');
         $this->line('');
 
@@ -1841,22 +1994,30 @@ BASH;
         }
 
         $this->line('');
+
+        $this->showEndNavigation('debugMenu');
     }
 
     private function viewRecentLogs(): void
     {
         $logPath = storage_path('logs/laravel.log');
-        
+
         if (!file_exists($logPath)) {
             warning('No log file found at: ' . $logPath);
+            $this->showEndNavigation('debugMenu');
             return;
         }
 
         $lines = text(
-            label: 'How many lines to show?',
+            label: 'How many lines to show? (or leave empty to go back)',
             default: '50',
-            validate: fn($v) => is_numeric($v) ? null : 'Must be a number'
+            required: false,
+            validate: fn($v) => $v && !is_numeric($v) ? 'Must be a number' : null
         );
+
+        if (empty($lines)) {
+            return;
+        }
 
         $filter = select(
             label: 'Filter logs?',
@@ -1865,9 +2026,14 @@ BASH;
                 'error' => 'Errors only',
                 'warning' => 'Warnings and errors',
                 'info' => 'Info, warnings, and errors',
+                'back' => '← Back',
             ],
             default: 'all'
         );
+
+        if ($filter === 'back') {
+            return;
+        }
 
         $grepFilter = match($filter) {
             'error' => ' | grep -i "error\|exception\|fatal"',
@@ -1877,20 +2043,23 @@ BASH;
         };
 
         $result = Process::run("tail -n {$lines} '{$logPath}'{$grepFilter}");
-        
+
         $this->line('');
         $this->line('<fg=gray>─────────────────────────────────────────────</>');
         $this->line($result->output() ?: '<fg=gray>No matching entries</>');
         $this->line('<fg=gray>─────────────────────────────────────────────</>');
         $this->line('');
-        
+
         note("Log file: {$logPath}");
         note("Size: " . $this->formatBytes(filesize($logPath)));
+
+        $this->showEndNavigation('debugMenu');
     }
 
     private function clearCaches(): void
     {
         if (!confirm('Clear all application caches?')) {
+            $this->showEndNavigation('debugMenu');
             return;
         }
 
@@ -1916,13 +2085,15 @@ BASH;
 
         $this->line('');
         info('✓ Cache clearing complete!');
+
+        $this->showEndNavigation('debugMenu');
     }
 
     private function listArtisanCommands(): void
     {
         $this->line('');
         $this->line('<fg=cyan>═══════════════════════════════════════════════════════════</>');
-        $this->line('<fg=yellow>  🛤️  AVAILABLE ARTISAN COMMANDS</>');
+        $this->line('<fg=yellow> AVAILABLE ARTISAN COMMANDS</>');
         $this->line('<fg=cyan>═══════════════════════════════════════════════════════════</>');
         $this->line('');
 
@@ -1942,6 +2113,8 @@ BASH;
         $this->line('  <fg=gray>php artisan flambient:process</> - Main workflow');
         $this->line('  <fg=gray>php artisan flambient:process --local</> - Local only');
         $this->line('');
+
+        $this->showEndNavigation('debugMenu');
     }
 
     private function showPhpInfo(): void
@@ -1960,6 +2133,8 @@ BASH;
         ];
 
         table(['Setting', 'Value'], array_slice($info, 1));
+
+        $this->showEndNavigation('debugMenu');
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1969,14 +2144,14 @@ BASH;
     private function settingsMenu(): void
     {
         $choice = select(
-            label: '⚙️  Settings & Configuration',
+            label: '⚙️ Settings & Configuration',
             options: [
-                'view' => '📋 View Current Configuration',
-                'edit' => '✏️  Edit .env File',
-                'imagemagick' => '🪄 ImageMagick Settings',
-                'imagen' => '☁️  Imagen AI Settings',
-                'storage' => '📁 Storage Paths',
-                'migrate' => '🔄 Run Database Migrations',
+                'view' => 'View Current Configuration',
+                'edit' => 'Edit .env File',
+                'imagemagick' => 'ImageMagick Settings',
+                'imagen' => '☁️ magen AI Settings',
+                'storage' => 'Storage Paths',
+                'migrate' => 'Run Database Migrations',
                 'back' => '← Back to Main Menu',
             ],
         );
@@ -1994,39 +2169,63 @@ BASH;
 
     private function viewConfiguration(): void
     {
-        $this->showEnvironment();
-    }
+        $env = [
+            ['Category', 'Key', 'Value'],
+            ['App', 'APP_ENV', env('APP_ENV', 'production')],
+            ['App', 'APP_DEBUG', env('APP_DEBUG') ? 'true' : 'false'],
+            ['App', 'APP_URL', env('APP_URL', 'http://localhost')],
+            ['Database', 'DB_CONNECTION', env('DB_CONNECTION', 'sqlite')],
+            ['Database', 'DB_DATABASE', basename(env('DB_DATABASE', 'database.sqlite'))],
+            ['Imagen', 'API Key', env('IMAGEN_AI_API_KEY') ? '✓ Set (' . strlen(env('IMAGEN_AI_API_KEY')) . ' chars)' : '✗ Not Set'],
+            ['Imagen', 'Profile Key', env('IMAGEN_PROFILE_KEY', '309406')],
+            ['Imagen', 'Base URL', env('IMAGEN_API_BASE_URL', 'default')],
+            ['ImageMagick', 'Binary', env('IMAGEMAGICK_BINARY', 'magick')],
+            ['ImageMagick', 'Level Low', env('IMAGEMAGICK_LEVEL_LOW', '40%')],
+            ['ImageMagick', 'Level High', env('IMAGEMAGICK_LEVEL_HIGH', '140%')],
+            ['System', 'PHP Version', PHP_VERSION],
+            ['System', 'Laravel', app()->version()],
+            ['System', 'Memory Limit', ini_get('memory_limit')],
+        ];
 
+        table(['Category', 'Key', 'Value'], array_slice($env, 1));
+
+        $this->showEndNavigation('settingsMenu');
+    }
     private function editEnvFile(): void
     {
-        $editor = env('EDITOR', 'nano');
         $envPath = base_path('.env');
-        
+
         $editorChoice = select(
             label: 'Select editor',
             options: [
-                'nano' => 'nano (terminal)',
-                'vim' => 'vim (terminal)',
-                'code' => 'VS Code',
+                'code' => 'VS Code (Recommended)',
+                'micro' => 'micro (terminal)',
                 'open' => 'Default app (TextEdit)',
+                'back' => '← Back',
             ],
-            default: 'nano'
+            default: 'code'
         );
 
+        if ($editorChoice === 'back') {
+            return;
+        }
+
         $editor = match($editorChoice) {
-            'nano' => 'nano',
-            'vim' => 'vim',
+            'micro' => 'micro',
             'code' => 'code',
             'open' => 'open -t',
+            default => 'code',
         };
 
         info("Opening .env with {$editorChoice}...");
-        
+
         if ($editorChoice === 'code') {
             Process::run("{$editor} '{$envPath}'");
         } else {
             Process::tty()->run("{$editor} '{$envPath}'");
         }
+
+        $this->showEndNavigation('settingsMenu');
     }
 
     private function configureImageMagick(): void
@@ -2046,20 +2245,38 @@ BASH;
 
         $this->line('');
         note('Edit .env file to change these settings');
-        
+
         if (confirm('Edit .env now?')) {
             $this->editEnvFile();
+        } else {
+            $this->showEndNavigation('settingsMenu');
         }
     }
 
     private function configureImagen(): void
     {
-        $this->showImagenConfig();
-        
+        $config = [
+            ['Setting', 'Value', 'Status'],
+            [
+                'API Key',
+                env('IMAGEN_AI_API_KEY') ? '••••••' . substr(env('IMAGEN_AI_API_KEY'), -4) : 'Not Set',
+                env('IMAGEN_AI_API_KEY') ? '✓' : '✗'
+            ],
+            ['Base URL', env('IMAGEN_API_BASE_URL', 'https://api-beta.imagen-ai.com/v1'), '✓'],
+            ['Profile Key', env('IMAGEN_PROFILE_KEY', '309406'), '✓'],
+            ['Timeout', env('IMAGEN_TIMEOUT', '30') . 's', '✓'],
+            ['Poll Interval', env('IMAGEN_POLL_INTERVAL', '30') . 's', '✓'],
+            ['Max Poll Attempts', env('IMAGEN_POLL_MAX_ATTEMPTS', '240'), '✓'],
+        ];
+
+        table(['Setting', 'Value', 'Status'], array_slice($config, 1));
+
         $this->line('');
-        
+
         if (confirm('Test Imagen API connection?')) {
-            $this->testAllConnections();
+            $this->testImagenApiEndpoints();
+        } else {
+            $this->showEndNavigation('settingsMenu');
         }
     }
 
@@ -2076,21 +2293,54 @@ BASH;
         ];
 
         table(['Path', 'Location', 'Exists'], array_slice($paths, 1));
+
+        $this->showEndNavigation('settingsMenu');
     }
 
     private function runMigrations(): void
     {
         if (!confirm('Run database migrations?')) {
+            $this->showEndNavigation('settingsMenu');
             return;
         }
 
         info('Running migrations...');
         $this->call('migrate', ['--force' => true]);
+
+        $this->showEndNavigation('settingsMenu');
     }
 
     // ═══════════════════════════════════════════════════════════
     // UTILITIES
     // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Show navigation options after an action completes.
+     * Returns the chosen action: 'back', 'home', or null to continue.
+     */
+    private function showEndNavigation(?string $parentMenu = null): ?string
+    {
+        $this->line('');
+
+        $options = [];
+
+        if ($parentMenu) {
+            $options['back'] = '← Back';
+        }
+        $options['home'] = '🏠 Main Menu';
+
+        $choice = select(
+            label: 'What would you like to do next?',
+            options: $options,
+            hint: 'Navigate to another section'
+        );
+
+        if ($choice === 'home') {
+            return 'home';
+        }
+
+        return $choice;
+    }
 
     private function formatBytes(int $bytes, int $precision = 2): string
     {
