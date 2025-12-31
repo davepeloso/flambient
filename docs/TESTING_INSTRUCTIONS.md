@@ -275,7 +275,3 @@ php artisan imagen:process \
   --type=real_estate \
   --source=shortcut \
   --parent=<first-job-id>
-
-  # Darktable Ajustments for Real Estate
-
-  dt-render "input.jpg" "output.jpg" --style "re-ajustments"

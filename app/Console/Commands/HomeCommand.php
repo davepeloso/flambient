@@ -356,7 +356,7 @@ class HomeCommand extends Command
                 'projects' => 'View Recent Projects',
                 'status' => 'Check Job Status (by UUID)',
                 'local_jobs' => 'View Local Job Records',
-                'upload' => 'Upload to Imagen',
+                'upload' => 'Process Images with Imagen AI', 
                 'export' => 'Export & Download Results',
                 'config' => '⚙️ View Imagen Config',
                 'api_test' => 'Test API Endpoints',
@@ -583,42 +583,12 @@ class HomeCommand extends Command
 
     private function uploadToImagen(): void
     {
-        $folders = $this->getOutputFolders();
+        info('Imagen AI Processor');
+        note('Upload images to Imagen AI for professional editing');
+        $this->newLine();
 
-        if (empty($folders)) {
-            warning('No processed folders available for upload.');
-            note('Run the Flambient workflow first to generate blended images.');
-            $this->showEndNavigation('imagenMenu');
-            return;
-        }
-
-        $folders['back'] = '← Back';
-        $folders['home'] = '🏠 Main Menu';
-
-        $selected = select(
-            label: 'Select folder to upload',
-            options: $folders
-        );
-
-        if ($selected === 'back' || $selected === 'home') {
-            return;
-        }
-
-        $profileKey = text(
-            label: 'Imagen Profile Key',
-            default: env('IMAGEN_PROFILE_KEY', '309406'),
-            required: true
-        );
-
-        if (!confirm("Upload images from {$selected} using profile {$profileKey}?")) {
-            $this->showEndNavigation('imagenMenu');
-            return;
-        }
-
-        info("Starting upload to Imagen AI...");
-        warning('Full upload implementation requires ImagenClient service.');
-        note("Would upload from: {$selected}");
-        note("With profile: {$profileKey}");
+        // Call the imagen:process command which handles all the interactive prompts
+        $this->call('imagen:process');
 
         $this->showEndNavigation('imagenMenu');
     }

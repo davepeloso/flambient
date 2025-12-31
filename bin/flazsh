@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# Flambient - D-MEC Image Processor
+# flaZsh - D-MEC Image Processor
 # Version 2.1.0 "Flazsh Revival"
 #
-# Global command wrapper for the Laravel-based Flambient application
-# This script allows you to run Flambient from anywhere on your system
+# Global command wrapper for the Laravel-based flaZsh application
+# This script allows you to run flaZsh from anywhere on your system
 
 # Resolve symlinks to find the actual script location
 SOURCE="${BASH_SOURCE[0]}"
