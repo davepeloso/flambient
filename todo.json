@@ -1,0 +1,35 @@
+
+{
+  "todos": [
+    {
+      "id": "1",
+      "content": "Add validation for user input in editEnvFile method",
+      "status": "pending",
+      "priority": "medium"
+    },
+    {
+      "id": "2", 
+      "content": "Add more editor options like VS Code, Sublime Text to editor selection",
+      "status": "in_progress",
+      "priority": "high"
+    },
+    {
+      "id": "3",
+      "content": "Complete error handling for file operations",
+      "status": "pending", 
+      "priority": "high"
+    },
+    {
+      "id": "4",
+      "content": "Add documentation for HomeCommand class",
+      "status": "pending",
+      "priority": "low"
+    },
+    {
+      "id": "5",
+      "content": "Fix dependency check output - magick command showing entire help data instead of short version",
+      "status": "pending",
+      "priority": "high"
+    }
+  ]
+}

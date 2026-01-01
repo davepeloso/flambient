@@ -175,22 +175,140 @@ class ImagenProcessCommand extends Command
             return self::FAILURE;
         }
 
+        info("Resuming job: {$this->job->id}");
+        note("Project: {$this->job->project_name}");
+
+        // Sync status from Imagen API if we have a project UUID
+        if ($this->job->project_uuid) {
+            $this->syncStatusFromApi();
+        }
+
+        note("Status: {$this->job->status->label()}");
+        note("Progress: {$this->job->uploaded_files}/{$this->job->total_files} uploaded");
+        $this->newLine();
+
         if (!$this->job->canResume()) {
             error("Job cannot be resumed (status: {$this->job->status->label()})");
             return self::FAILURE;
         }
 
-        info("Resuming job: {$this->job->id}");
-        note("Project: {$this->job->project_name}");
-        note("Status: {$this->job->status->label()}");
-        note("Progress: {$this->job->uploaded_files}/{$this->job->total_files} uploaded");
-        $this->newLine();
+        // For failed jobs, ask if they want to retry with different profile/options
+        if ($this->job->isFailed()) {
+            warning("Previous error: {$this->job->error_message}");
+            $this->newLine();
+
+            $retryChoice = select(
+                label: 'How would you like to retry?',
+                options: [
+                    'reselect' => 'Re-select profile and options (recommended for profile errors)',
+                    'continue' => 'Continue from where it failed',
+                    'cancel' => '← Cancel',
+                ],
+                hint: 'Profile errors require re-selecting the profile'
+            );
+
+            if ($retryChoice === 'cancel') {
+                return self::SUCCESS;
+            }
+
+            if ($retryChoice === 'reselect') {
+                return $this->retryWithNewProfile();
+            }
+        }
 
         if (!confirm('Resume this job?', default: true)) {
             return self::SUCCESS;
         }
 
         return $this->executeFromStep($this->job->status);
+    }
+
+    /**
+     * Sync local job status with Imagen API
+     */
+    private function syncStatusFromApi(): void
+    {
+        try {
+            $apiStatus = spin(
+                callback: fn() => $this->client->getEditStatus($this->job->project_uuid),
+                message: 'Checking status with Imagen AI...'
+            );
+
+            // Map API status to local status
+            $statusLower = strtolower($apiStatus->status);
+
+            if ($apiStatus->isComplete) {
+                // Check if we already downloaded
+                if ($this->job->downloaded_files > 0) {
+                    $this->job->update(['status' => ImagenJobStatus::Completed]);
+                } else {
+                    $this->job->update(['status' => ImagenJobStatus::Downloading]);
+                }
+            } elseif ($apiStatus->isFailed) {
+                $this->job->update([
+                    'status' => ImagenJobStatus::Failed,
+                    'error_message' => $apiStatus->message ?? 'Failed on Imagen AI',
+                ]);
+            } elseif (in_array($statusLower, ['pending', 'queued'])) {
+                // Still pending on Imagen - might need to start editing
+                if ($this->job->uploaded_files >= $this->job->total_files) {
+                    $this->job->update(['status' => ImagenJobStatus::Processing]);
+                }
+            } elseif (in_array($statusLower, ['processing', 'editing', 'in_progress'])) {
+                $this->job->update([
+                    'status' => ImagenJobStatus::Processing,
+                    'progress' => $apiStatus->progress,
+                ]);
+            } elseif (in_array($statusLower, ['exporting', 'export_pending'])) {
+                $this->job->update(['status' => ImagenJobStatus::Exporting]);
+            }
+
+            $this->job->refresh();
+        } catch (\Exception $e) {
+            warning("Could not sync with API: {$e->getMessage()}");
+            // Continue with local status
+        }
+    }
+
+    /**
+     * Retry a failed job with new profile/options selection
+     */
+    private function retryWithNewProfile(): int
+    {
+        info('Re-selecting profile and options...');
+        $this->newLine();
+
+        // Get new profile
+        $profileKey = $this->getProfile();
+        $editOptions = $this->getEditOptions();
+
+        // Update job with new settings
+        $this->job->update([
+            'profile_key' => $profileKey,
+            'edit_options' => $editOptions->toArray(),
+            'photography_type' => $editOptions->photographyType?->value,
+            'status' => ImagenJobStatus::Processing, // Reset to processing
+            'error_message' => null,
+        ]);
+
+        // Show updated config
+        $this->newLine();
+        table(
+            headers: ['Setting', 'Value'],
+            rows: [
+                ['Profile', $profileKey],
+                ['Window Pull', $editOptions->windowPull ? 'Yes' : 'No'],
+                ['Auto Crop', $editOptions->crop ? 'Yes' : 'No'],
+                ['Photography Type', $editOptions->photographyType?->value ?? 'Auto'],
+            ]
+        );
+
+        if (!confirm('Start processing with these settings?', default: true)) {
+            return self::SUCCESS;
+        }
+
+        // Start from processing step (images already uploaded)
+        return $this->executeFromStep(ImagenJobStatus::Processing);
     }
 
     /**
@@ -539,20 +657,34 @@ class ImagenProcessCommand extends Command
         outro('Imagen AI processing complete!');
         $this->newLine();
 
+        $editedPath = "{$this->job->output_directory}/edited";
+        $outputExists = is_dir($editedPath);
+
+        $rows = [
+            ['Job ID', $this->job->id],
+            ['Project UUID', $this->job->project_uuid],
+            ['Images Uploaded', $this->job->uploaded_files],
+            ['Images Downloaded', $this->job->downloaded_files],
+            ['Duration', $this->job->getDurationForHumans()],
+        ];
+
+        if ($outputExists) {
+            $rows[] = ['Output Location', $editedPath];
+        }
+
         table(
             headers: ['Result', 'Value'],
-            rows: [
-                ['Job ID', $this->job->id],
-                ['Project UUID', $this->job->project_uuid],
-                ['Images Uploaded', $this->job->uploaded_files],
-                ['Images Downloaded', $this->job->downloaded_files],
-                ['Duration', $this->job->getDurationForHumans()],
-                ['Output Location', "{$this->job->output_directory}/edited"],
-            ]
+            rows: $rows
         );
 
         $this->newLine();
-        note("View your processed images at:\n  {$this->job->output_directory}/edited");
+
+        if ($outputExists) {
+            note("View your processed images at:\n  {$editedPath}");
+        } elseif ($this->job->downloaded_files === 0) {
+            warning("No images downloaded yet. You may need to resume the job to download results.");
+        }
+
         note("Check job history with:\n  php artisan imagen:process --list");
     }
 
@@ -565,12 +697,14 @@ class ImagenProcessCommand extends Command
         $input = $this->option('input');
 
         if (!$input) {
-            $input = text(
+            $input = $this->browseForDirectory(
                 label: 'Input directory',
-                placeholder: '/path/to/images or public/shoot-name',
-                required: true,
-                validate: fn($value) => $this->validateDirectory($value)
+                placeholder: '/path/to/images or public/shoot-name'
             );
+
+            if (!$input) {
+                return null;
+            }
         }
 
         $input = $this->resolvePath($input);
@@ -581,6 +715,122 @@ class ImagenProcessCommand extends Command
         }
 
         return $input;
+    }
+
+    /**
+     * Browse for a directory starting from public/ or enter manually
+     */
+    private function browseForDirectory(string $label, string $placeholder): ?string
+    {
+        $choice = select(
+            label: $label,
+            options: [
+                'browse' => 'Browse public/ folder',
+                'manual' => 'Enter path manually',
+                'cancel' => '← Cancel',
+            ],
+            hint: 'Select how to choose the directory'
+        );
+
+        if ($choice === 'cancel') {
+            return null;
+        }
+
+        if ($choice === 'manual') {
+            return text(
+                label: $label,
+                placeholder: $placeholder,
+                required: false,
+                validate: fn($value) => $value ? $this->validateDirectory($value) : null
+            );
+        }
+
+        // Browse public/ folder
+        $publicPath = base_path('public');
+        $directories = $this->getSubdirectories($publicPath);
+
+        if (empty($directories)) {
+            warning('No subdirectories found in public/');
+            return text(
+                label: $label,
+                placeholder: $placeholder,
+                required: false,
+                validate: fn($value) => $value ? $this->validateDirectory($value) : null
+            );
+        }
+
+        $options = [];
+        foreach ($directories as $dir) {
+            $relativePath = 'public/' . basename($dir);
+            $imageCount = $this->countImagesInDirectory($dir);
+            $options[$relativePath] = basename($dir) . ($imageCount > 0 ? " ({$imageCount} images)" : '');
+        }
+        $options['manual'] = '← Enter path manually';
+        $options['cancel'] = '← Cancel';
+
+        $selected = select(
+            label: 'Select folder from public/',
+            options: $options,
+            scroll: 15
+        );
+
+        if ($selected === 'cancel') {
+            return null;
+        }
+
+        if ($selected === 'manual') {
+            return text(
+                label: $label,
+                placeholder: $placeholder,
+                required: false,
+                validate: fn($value) => $value ? $this->validateDirectory($value) : null
+            );
+        }
+
+        return $selected;
+    }
+
+    /**
+     * Get subdirectories of a path
+     */
+    private function getSubdirectories(string $path): array
+    {
+        if (!is_dir($path)) {
+            return [];
+        }
+
+        $directories = [];
+        $items = scandir($path);
+
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..') {
+                continue;
+            }
+
+            $fullPath = $path . '/' . $item;
+            if (is_dir($fullPath) && !str_starts_with($item, '.')) {
+                $directories[] = $fullPath;
+            }
+        }
+
+        sort($directories);
+        return $directories;
+    }
+
+    /**
+     * Count images in a directory
+     */
+    private function countImagesInDirectory(string $directory): int
+    {
+        $extensions = ['jpg', 'jpeg', 'cr2', 'cr3', 'nef', 'arw', 'dng', 'raf'];
+        $count = 0;
+
+        foreach ($extensions as $ext) {
+            $count += count(glob("{$directory}/*.{$ext}", GLOB_NOSORT));
+            $count += count(glob("{$directory}/*." . strtoupper($ext), GLOB_NOSORT));
+        }
+
+        return $count;
     }
 
     private function getOutputDirectory(string $inputDirectory): string

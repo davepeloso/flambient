@@ -110,3 +110,22 @@ To make this work "live," we use the **Automator** app:
 1. You finish your "flambient" shots and drop them into your watched folder.
 2. macOS detects the new files and silently wakes up darktable-cli in the background.
 3. A few seconds later, a processed/ folder appears inside with all your edits applied.
+
+### 1\. VIPS Command
+Use libvips to batch compress images and optionally strip metadata:
+
+```bash
+mkdir -p out
+for f in *.jpg *.JPG; do
+  [ -e "$f" ] || continue
+  vips copy "$f" "out/${f%.*}.jpg[Q=88,strip]"
+done ```
+
+```
+# For progressive JPEGs with optimization keeping metadata
+mkdir -p out
+for f in *.jpg *.JPG; do
+  [ -e "$f" ] || continue
+  vips copy "$f" "out/${f%.*}.jpg[Q=88,optimize_coding,interlace]"
+done
+```

@@ -3,9 +3,7 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
-use App\Models\Batch;
-use App\Models\Image;
-use App\Models\ExposureStack;
+use App\Models\ImagenJob;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
@@ -23,6 +21,7 @@ use function Laravel\Prompts\intro;
 use function Laravel\Prompts\outro;
 use function Laravel\Prompts\search;
 use function Laravel\Prompts\multiselect;
+use function Laravel\Prompts\progress;
 
 class HomeCommand extends Command
 {
@@ -168,8 +167,8 @@ class HomeCommand extends Command
             label: 'Image Processing',
             options: [
                 'flambient' => 'Run Flambient Workflow',
-                'upload' => 'Upload & Extract EXIF',
-                'classify' => 'Classify Exposure Stacks',
+                'upload' => 'Process Images with Imagen AI',
+                'batch' => 'Batch Processing',
                 'generate' => 'Generate ImageMagick Scripts',
                 'execute' => 'Execute Processing Scripts',
                 'reprocess' => 'Reprocess EXIF Data',
@@ -181,8 +180,8 @@ class HomeCommand extends Command
 
         match ($choice) {
             'flambient' => $this->runFlambientWorkflow(),
-            'upload' => $this->runUploadWorkflow(),
-            'classify' => $this->runClassifyWorkflow(),
+            'upload' => $this->uploadToImagen(),
+            'batch' => $this->batchProcessingMenu(),
             'generate' => $this->runGenerateScripts(),
             'execute' => $this->runExecuteScripts(),
             'reprocess' => $this->call('flambient:reprocess-exif'),
@@ -221,61 +220,10 @@ class HomeCommand extends Command
         $this->showEndNavigation('imageProcessingMenu');
     }
 
-    private function runUploadWorkflow(): void
-    {
-        info('Opening web upload interface...');
-        $url = config('app.url') . '/upload';
-        note("Navigate to: {$url}");
-
-        if (confirm('Open in browser?', default: true)) {
-            Process::run("open '{$url}'");
-        }
-
-        $this->showEndNavigation('imageProcessingMenu');
-    }
-
-    private function runClassifyWorkflow(): void
-    {
-        info('Opening cull/classify interface...');
-        $url = config('app.url') . '/cull';
-        note("Navigate to: {$url}");
-
-        if (confirm('Open in browser?', default: true)) {
-            Process::run("open '{$url}'");
-        }
-
-        $this->showEndNavigation('imageProcessingMenu');
-    }
-
     private function runGenerateScripts(): void
     {
-        $batches = Batch::where('status', 'pending')->orWhere('status', 'classified')->get();
-
-        if ($batches->isEmpty()) {
-            warning('No batches ready for script generation.');
-            note('Upload and classify images first.');
-            $this->showEndNavigation('imageProcessingMenu');
-            return;
-        }
-
-        $options = $batches->mapWithKeys(fn($b) => [
-            $b->id => substr($b->id, 0, 8) . "... ({$b->image_count} images)"
-        ])->toArray();
-        $options['back'] = '← Back';
-        $options['home'] = '🏠 Main Menu';
-
-        $selected = select(
-            label: 'Select batch for script generation',
-            options: $options
-        );
-
-        if ($selected === 'back' || $selected === 'home') {
-            return;
-        }
-
-        info("Generating scripts for batch: {$selected}");
-        warning('Script generation command not yet fully implemented.');
-        note('This will generate ImageMagick .mgk scripts based on your exposure stacks.');
+        warning('Script generation not yet implemented.');
+        note('This feature will generate ImageMagick .mgk scripts for batch processing.');
 
         $this->showEndNavigation('imageProcessingMenu');
     }
@@ -335,6 +283,484 @@ class HomeCommand extends Command
     }
 
     // ═══════════════════════════════════════════════════════════
+    // BATCH PROCESSING MENU
+    // ═══════════════════════════════════════════════════════════
+
+    private function batchProcessingMenu(): void
+    {
+        $choice = select(
+            label: 'Batch Processing',
+            options: [
+                'compress' => 'Compress Images',
+                'filter' => 'Apply Darktable Filter',
+                'back' => '← Back',
+            ],
+            hint: 'Select a batch operation'
+        );
+
+        match ($choice) {
+            'compress' => $this->batchCompressImages(),
+            'filter' => $this->batchApplyDarktableFilter(),
+            'back' => null,
+        };
+    }
+
+    private function batchCompressImages(): void
+    {
+        info('Batch Image Compression');
+        note('Compress images using libvips with various quality profiles');
+        $this->newLine();
+
+        // Select directory
+        $directory = $this->selectBatchDirectory();
+        if (!$directory) {
+            return;
+        }
+
+        // Find images
+        $images = $this->findImagesInDirectory($directory);
+        if (empty($images)) {
+            warning('No images found in selected directory.');
+            $this->showEndNavigation('imageProcessingMenu');
+            return;
+        }
+
+        info("Found " . count($images) . " images");
+
+        // Select compression profile
+        $profile = select(
+            label: 'Select compression profile',
+            options: [
+                'web_standard' => 'Web Standard (Q=85, strip metadata, ~70% smaller)',
+                'web_safe' => 'Web-Safe Color (Q=88, keep metadata, sRGB profile)',
+                'high_quality' => 'High Quality (Q=92, keep metadata, no subsampling)',
+                'mls_ready' => 'MLS Ready (Q=90, progressive, optimized)',
+            ],
+            hint: 'Choose quality vs file size tradeoff'
+        );
+
+        // Overwrite or create new?
+        $outputMode = select(
+            label: 'Output mode',
+            options: [
+                'overwrite' => 'Overwrite original images',
+                'subfolder' => 'Create compressed/ subfolder',
+            ],
+            hint: 'Where to save compressed images'
+        );
+
+        $overwrite = $outputMode === 'overwrite';
+
+        if ($overwrite) {
+            if (!confirm('This will permanently overwrite the original images. Continue?', default: false)) {
+                info('Operation cancelled.');
+                $this->showEndNavigation('imageProcessingMenu');
+                return;
+            }
+        }
+
+        // Get vips options based on profile
+        $vipsOptions = match ($profile) {
+            'web_standard' => 'Q=85,strip',
+            'web_safe' => 'Q=88,optimize_coding,interlace,subsample_mode=on,profile=sRGB',
+            'high_quality' => 'Q=92,optimize_coding,interlace,subsample_mode=off',
+            'mls_ready' => 'Q=90,optimize_coding,interlace,strip',
+        };
+
+        // Create output directory if needed
+        $outputDir = $overwrite ? null : "{$directory}/compressed";
+        if ($outputDir && !is_dir($outputDir)) {
+            mkdir($outputDir, 0755, true);
+        }
+
+        // Process images
+        $progress = progress(
+            label: 'Compressing images',
+            steps: count($images)
+        );
+
+        $progress->start();
+        $succeeded = 0;
+        $failed = [];
+
+        foreach ($images as $image) {
+            $filename = basename($image);
+            $outputPath = $overwrite ? $image : "{$outputDir}/{$filename}";
+
+            // For overwrite, use temp file then move
+            if ($overwrite) {
+                $tempPath = "{$directory}/.tmp_{$filename}";
+                $result = Process::run("vips copy \"{$image}\" \"{$tempPath}[{$vipsOptions}]\"");
+
+                if ($result->successful()) {
+                    rename($tempPath, $image);
+                    $succeeded++;
+                } else {
+                    @unlink($tempPath);
+                    $failed[] = $filename;
+                }
+            } else {
+                $result = Process::run("vips copy \"{$image}\" \"{$outputPath}[{$vipsOptions}]\"");
+
+                if ($result->successful()) {
+                    $succeeded++;
+                } else {
+                    $failed[] = $filename;
+                }
+            }
+
+            $progress->advance();
+        }
+
+        $progress->finish();
+        $this->newLine();
+
+        info("Compressed {$succeeded} of " . count($images) . " images");
+
+        if (!empty($failed)) {
+            warning('Failed to compress: ' . implode(', ', array_slice($failed, 0, 5)));
+        }
+
+        if (!$overwrite) {
+            note("Output saved to: {$outputDir}");
+        }
+
+        // Ask about Imagen AI upload
+        if ($succeeded > 0 && confirm('Upload compressed images to Imagen AI?', default: false)) {
+            $inputPath = $overwrite ? $directory : $outputDir;
+            $this->call('imagen:process', ['--input' => $inputPath]);
+        }
+
+        $this->showEndNavigation('imageProcessingMenu');
+    }
+
+    private function batchApplyDarktableFilter(): void
+    {
+        info('Apply Darktable Filter');
+        note('Apply color correction styles using darktable-cli');
+        $this->newLine();
+
+        // Check if darktable-cli is available
+        $dtCheck = Process::run('which darktable-cli');
+        if (!$dtCheck->successful()) {
+            error('darktable-cli not found in PATH');
+            note('Install Darktable and ensure darktable-cli is accessible');
+            $this->showEndNavigation('imageProcessingMenu');
+            return;
+        }
+
+        // Select filter/style
+        $style = select(
+            label: 'Select Darktable style',
+            options: [
+                're-ajustments' => 're-ajustments (Color correction)',
+            ],
+            hint: 'Available Darktable styles'
+        );
+
+        // Single or batch?
+        $mode = select(
+            label: 'Processing mode',
+            options: [
+                'single' => 'Single image',
+                'batch' => 'Batch (entire folder)',
+            ],
+        );
+
+        if ($mode === 'single') {
+            $this->applySingleDarktableFilter($style);
+        } else {
+            $this->applyBatchDarktableFilter($style);
+        }
+    }
+
+    private function applySingleDarktableFilter(string $style): void
+    {
+        // Get image path
+        $imagePath = text(
+            label: 'Image path',
+            placeholder: '/path/to/image.jpg or public/folder/image.jpg',
+            required: true
+        );
+
+        $imagePath = $this->resolveBatchPath($imagePath);
+
+        if (!file_exists($imagePath)) {
+            error("File not found: {$imagePath}");
+            $this->showEndNavigation('imageProcessingMenu');
+            return;
+        }
+
+        // Overwrite or create new?
+        $overwrite = confirm('Overwrite original image?', default: false);
+
+        $outputPath = $imagePath;
+        if (!$overwrite) {
+            $dir = dirname($imagePath);
+            $filename = pathinfo($imagePath, PATHINFO_FILENAME);
+            $ext = pathinfo($imagePath, PATHINFO_EXTENSION);
+            $outputPath = "{$dir}/{$filename}_fixed.{$ext}";
+        }
+
+        // Process
+        $result = spin(
+            callback: function () use ($imagePath, $outputPath, $style, $overwrite) {
+                if ($overwrite) {
+                    $tempPath = dirname($imagePath) . '/.tmp_' . basename($imagePath);
+                    $result = Process::run("darktable-cli \"{$imagePath}\" \"{$tempPath}\" --style \"{$style}\"");
+                    if ($result->successful()) {
+                        rename($tempPath, $imagePath);
+                    }
+                    return $result;
+                } else {
+                    return Process::run("darktable-cli \"{$imagePath}\" \"{$outputPath}\" --style \"{$style}\"");
+                }
+            },
+            message: "Applying {$style} filter..."
+        );
+
+        if ($result->successful()) {
+            info("Filter applied successfully!");
+            note($overwrite ? "Image updated: {$imagePath}" : "Output saved: {$outputPath}");
+        } else {
+            error("Failed to apply filter");
+            note($result->errorOutput());
+        }
+
+        $this->showEndNavigation('imageProcessingMenu');
+    }
+
+    private function applyBatchDarktableFilter(string $style): void
+    {
+        // Select directory
+        $directory = $this->selectBatchDirectory();
+        if (!$directory) {
+            return;
+        }
+
+        // Find images
+        $images = $this->findImagesInDirectory($directory);
+        if (empty($images)) {
+            warning('No images found in selected directory.');
+            $this->showEndNavigation('imageProcessingMenu');
+            return;
+        }
+
+        info("Found " . count($images) . " images");
+
+        // Overwrite or create new?
+        $outputMode = select(
+            label: 'Output mode',
+            options: [
+                'overwrite' => 'Overwrite original images',
+                'subfolder' => 'Create filtered/ subfolder',
+            ],
+            hint: 'Where to save filtered images'
+        );
+
+        $overwrite = $outputMode === 'overwrite';
+
+        if ($overwrite) {
+            if (!confirm('This will permanently overwrite the original images. Continue?', default: false)) {
+                info('Operation cancelled.');
+                $this->showEndNavigation('imageProcessingMenu');
+                return;
+            }
+        }
+
+        // Create output directory if needed
+        $outputDir = $overwrite ? null : "{$directory}/filtered";
+        if ($outputDir && !is_dir($outputDir)) {
+            mkdir($outputDir, 0755, true);
+        }
+
+        // Process images
+        $progress = progress(
+            label: "Applying {$style} filter",
+            steps: count($images)
+        );
+
+        $progress->start();
+        $succeeded = 0;
+        $failed = [];
+
+        foreach ($images as $image) {
+            $filename = basename($image);
+
+            if ($overwrite) {
+                $tempPath = "{$directory}/.tmp_{$filename}";
+                $result = Process::run("darktable-cli \"{$image}\" \"{$tempPath}\" --style \"{$style}\" 2>/dev/null");
+
+                if ($result->successful() && file_exists($tempPath)) {
+                    rename($tempPath, $image);
+                    $succeeded++;
+                } else {
+                    @unlink($tempPath);
+                    $failed[] = $filename;
+                }
+            } else {
+                $outputPath = "{$outputDir}/{$filename}";
+                $result = Process::run("darktable-cli \"{$image}\" \"{$outputPath}\" --style \"{$style}\" 2>/dev/null");
+
+                if ($result->successful() && file_exists($outputPath)) {
+                    $succeeded++;
+                } else {
+                    $failed[] = $filename;
+                }
+            }
+
+            $progress->advance();
+        }
+
+        $progress->finish();
+        $this->newLine();
+
+        info("Processed {$succeeded} of " . count($images) . " images");
+
+        if (!empty($failed)) {
+            warning('Failed to process: ' . implode(', ', array_slice($failed, 0, 5)));
+            if (count($failed) > 5) {
+                note('...and ' . (count($failed) - 5) . ' more');
+            }
+        }
+
+        if (!$overwrite && $succeeded > 0) {
+            note("Output saved to: {$outputDir}");
+        }
+
+        // macOS notification
+        Process::run("osascript -e 'display notification \"Processed {$succeeded} images with {$style}\" with title \"Darktable Batch Complete\" sound name \"Glass\"'");
+
+        $this->showEndNavigation('imageProcessingMenu');
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // BATCH PROCESSING HELPERS
+    // ═══════════════════════════════════════════════════════════
+
+    private function selectBatchDirectory(): ?string
+    {
+        $choice = select(
+            label: 'Select image directory',
+            options: [
+                'browse' => 'Browse public/ folder',
+                'manual' => 'Enter path manually',
+                'cancel' => '← Cancel',
+            ],
+            hint: 'Where are your images?'
+        );
+
+        if ($choice === 'cancel') {
+            return null;
+        }
+
+        if ($choice === 'manual') {
+            $path = text(
+                label: 'Directory path',
+                placeholder: '/path/to/images or public/folder-name',
+                required: false
+            );
+
+            if (!$path) {
+                return null;
+            }
+
+            $resolved = $this->resolveBatchPath($path);
+
+            if (!is_dir($resolved)) {
+                error("Directory not found: {$resolved}");
+                return null;
+            }
+
+            return $resolved;
+        }
+
+        // Browse public/ folder
+        $publicPath = base_path('public');
+        $directories = $this->getBatchSubdirectories($publicPath);
+
+        if (empty($directories)) {
+            warning('No subdirectories found in public/');
+            return null;
+        }
+
+        $options = [];
+        foreach ($directories as $dir) {
+            $imageCount = count($this->findImagesInDirectory($dir));
+            $options[$dir] = basename($dir) . ($imageCount > 0 ? " ({$imageCount} images)" : '');
+        }
+        $options['cancel'] = '← Cancel';
+
+        $selected = select(
+            label: 'Select folder from public/',
+            options: $options,
+            scroll: 15
+        );
+
+        if ($selected === 'cancel') {
+            return null;
+        }
+
+        return $selected;
+    }
+
+    private function getBatchSubdirectories(string $path): array
+    {
+        if (!is_dir($path)) {
+            return [];
+        }
+
+        $directories = [];
+        $items = scandir($path);
+
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..' || str_starts_with($item, '.')) {
+                continue;
+            }
+
+            $fullPath = $path . '/' . $item;
+            if (is_dir($fullPath)) {
+                $directories[] = $fullPath;
+            }
+        }
+
+        sort($directories);
+        return $directories;
+    }
+
+    private function findImagesInDirectory(string $directory): array
+    {
+        $extensions = ['jpg', 'jpeg', 'JPG', 'JPEG', 'png', 'PNG'];
+        $images = [];
+
+        foreach ($extensions as $ext) {
+            $found = glob("{$directory}/*.{$ext}");
+            if ($found) {
+                $images = array_merge($images, $found);
+            }
+        }
+
+        // Exclude temp files
+        $images = array_filter($images, fn($f) => !str_starts_with(basename($f), '.tmp_'));
+
+        sort($images);
+        return array_values($images);
+    }
+
+    private function resolveBatchPath(string $path): string
+    {
+        if (str_starts_with($path, '/')) {
+            return $path;
+        }
+
+        if (str_starts_with($path, '~')) {
+            return str_replace('~', $_SERVER['HOME'] ?? '/Users/' . get_current_user(), $path);
+        }
+
+        return base_path($path);
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // IMAGEN AI MENU
     // ═══════════════════════════════════════════════════════════
 
@@ -353,11 +779,9 @@ class HomeCommand extends Command
             label: 'Imagen AI Integration',
             options: [
                 'profiles' => 'List Available Profiles',
-                'projects' => 'View Recent Projects',
                 'status' => 'Check Job Status (by UUID)',
                 'local_jobs' => 'View Local Job Records',
-                'upload' => 'Process Images with Imagen AI', 
-                'export' => 'Export & Download Results',
+                'export' => 'Download from Imagen AI',
                 'config' => '⚙️ View Imagen Config',
                 'api_test' => 'Test API Endpoints',
                 'back' => '← Back to Main Menu',
@@ -366,10 +790,8 @@ class HomeCommand extends Command
 
         match ($choice) {
             'profiles' => $this->listImagenProfiles(),
-            'projects' => $this->listImagenProjects(),
             'status' => $this->checkImagenJobStatus(),
             'local_jobs' => $this->viewLocalImagenJobs(),
-            'upload' => $this->uploadToImagen(),
             'export' => $this->exportFromImagen(),
             'config' => $this->showImagenConfig(),
             'api_test' => $this->testImagenApiEndpoints(),
@@ -409,52 +831,6 @@ class HomeCommand extends Command
         } else {
             error('Failed to fetch profiles.');
             $this->line('Response: ' . json_encode($result));
-        }
-
-        $this->showEndNavigation('imagenMenu');
-    }
-
-    private function listImagenProjects(): void
-    {
-        $apiKey = $this->getImagenApiKey();
-        $baseUrl = $this->getImagenBaseUrl();
-
-        $result = spin(
-            callback: function () use ($apiKey, $baseUrl) {
-                $response = Http::withToken($apiKey)
-                    ->timeout(30)
-                    ->get("{$baseUrl}/projects/");
-                return $response->json();
-            },
-            message: 'Fetching Imagen AI projects...'
-        );
-
-        if (isset($result['data']['projects'])) {
-            $projects = collect($result['data']['projects'])->take(15)->map(function ($project) {
-                $status = $project['project_status'] ?? 'Unknown';
-                $statusIcon = match($status) {
-                    'completed' => '✅',
-                    'processing' => '⏳',
-                    'failed' => '❌',
-                    'pending' => '🕐',
-                    default => '❓'
-                };
-
-                return [
-                    'UUID' => substr($project['project_uuid'] ?? '', 0, 8) . '...',
-                    'Name' => substr($project['project_name'] ?? 'Unnamed', 0, 25),
-                    'Status' => $statusIcon . ' ' . $status,
-                    'Images' => $project['number_of_photos'] ?? 0,
-                    'Created' => isset($project['created_at'])
-                        ? date('Y-m-d H:i', strtotime($project['created_at']))
-                        : 'N/A',
-                ];
-            })->toArray();
-
-            table(['UUID', 'Name', 'Status', 'Images', 'Created'], $projects);
-            note('Showing last 15 projects. Use "Check Job Status" to view details.');
-        } else {
-            warning('No projects found or API returned unexpected format.');
         }
 
         $this->showEndNavigation('imagenMenu');
@@ -590,19 +966,56 @@ class HomeCommand extends Command
         // Call the imagen:process command which handles all the interactive prompts
         $this->call('imagen:process');
 
-        $this->showEndNavigation('imagenMenu');
+        $this->showEndNavigation('imageProcessingMenu');
     }
 
     private function exportFromImagen(): void
     {
-        $uuid = text(
-            label: 'Enter Project UUID to export (or leave empty to go back)',
-            placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
-            required: false
+        // Query database for recent jobs with project UUIDs
+        $jobs = ImagenJob::whereNotNull('project_uuid')
+            ->orderBy('created_at', 'desc')
+            ->limit(15)
+            ->get();
+
+        if ($jobs->isEmpty()) {
+            warning('No Imagen jobs found in database.');
+            note('Process images with Imagen AI first to create jobs.');
+            $this->showEndNavigation('imagenMenu');
+            return;
+        }
+
+        // Build selection options
+        $options = $jobs->mapWithKeys(function ($job) {
+            $status = $job->status->value ?? $job->status;
+            $date = $job->created_at->format('M j, g:ia');
+            $label = "{$job->project_name} ({$status}) - {$date}";
+            return [$job->project_uuid => $label];
+        })->toArray();
+
+        $options['manual'] = 'Enter UUID manually';
+        $options['back'] = '← Back';
+
+        $selection = select(
+            label: 'Select a project to download results from',
+            options: $options,
+            hint: 'Recent Imagen AI jobs from database'
         );
 
-        if (empty($uuid)) {
+        if ($selection === 'back') {
             return;
+        }
+
+        if ($selection === 'manual') {
+            $uuid = text(
+                label: 'Enter Project UUID',
+                placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+                required: false
+            );
+            if (empty($uuid)) {
+                return;
+            }
+        } else {
+            $uuid = $selection;
         }
 
         $apiKey = $this->getImagenApiKey();
@@ -772,12 +1185,10 @@ class HomeCommand extends Command
     private function databaseMenu(): void
     {
         $choice = select(
-            label: '📊 Database & Jobs',
+            label: 'Database & Jobs',
             options: [
                 'stats' => 'Database Statistics',
-                'batches' => 'View Batches',
-                'images' => 'View Images',
-                'stacks' => 'View Exposure Stacks',
+                'imagen_jobs' => 'View Imagen Jobs',
                 'jobs' => 'View Laravel Jobs Queue',
                 'query' => 'Run Custom Query (SELECT only)',
                 'tables' => 'List All Tables',
@@ -788,9 +1199,7 @@ class HomeCommand extends Command
 
         match ($choice) {
             'stats' => $this->showDatabaseStats(),
-            'batches' => $this->viewBatches(),
-            'images' => $this->viewImages(),
-            'stacks' => $this->viewStacks(),
+            'imagen_jobs' => $this->viewImagenJobs(),
             'jobs' => $this->viewJobs(),
             'query' => $this->runRawQuery(),
             'tables' => $this->listDatabaseTables(),
@@ -801,12 +1210,15 @@ class HomeCommand extends Command
 
     private function showDatabaseStats(): void
     {
-        $stats = [
-            ['Table', 'Records', 'Status'],
-            ['Batches', Batch::count(), '✓'],
-            ['Images', Image::count(), '✓'],
-            ['Exposure Stacks', ExposureStack::count(), '✓'],
-        ];
+        $stats = [];
+
+        // Imagen Jobs
+        try {
+            $imagenCount = ImagenJob::count();
+            $stats[] = ['Imagen Jobs', $imagenCount, '✓'];
+        } catch (\Exception $e) {
+            $stats[] = ['Imagen Jobs', 'N/A', '✗'];
+        }
 
         // Add jobs if table exists
         try {
@@ -824,7 +1236,7 @@ class HomeCommand extends Command
             // Table doesn't exist
         }
 
-        table(['Table', 'Records', 'Status'], array_slice($stats, 1));
+        table(['Table', 'Records', 'Status'], $stats);
 
         // Show database file info
         $dbPath = database_path('database.sqlite');
@@ -838,104 +1250,27 @@ class HomeCommand extends Command
         $this->showEndNavigation('databaseMenu');
     }
 
-    private function viewBatches(): void
+    private function viewImagenJobs(): void
     {
-        $batches = Batch::latest()->take(15)->get();
+        $jobs = ImagenJob::latest()->take(20)->get();
 
-        if ($batches->isEmpty()) {
-            warning('No batches found.');
+        if ($jobs->isEmpty()) {
+            warning('No Imagen jobs found.');
             $this->showEndNavigation('databaseMenu');
             return;
         }
 
-        $data = $batches->map(function ($batch) {
-            $statusIcon = match($batch->status) {
-                'completed' => '✅',
-                'processing' => '⏳',
-                'failed' => '❌',
-                'pending' => '🕐',
-                'classified' => '🏷️',
-                default => '❓'
-            };
-
+        $data = $jobs->map(function ($job) {
             return [
-                'ID' => substr($batch->id, 0, 8) . '...',
-                'Status' => $statusIcon . ' ' . $batch->status,
-                'Images' => $batch->image_count,
-                'Size' => $this->formatBytes($batch->total_size),
-                'Created' => $batch->created_at->diffForHumans(),
+                'ID' => substr($job->id, 0, 8),
+                'Project' => substr($job->project_name, 0, 30),
+                'Status' => $job->status->label(),
+                'Files' => "{$job->uploaded_files}/{$job->total_files}",
+                'Created' => $job->created_at->diffForHumans(),
             ];
         })->toArray();
 
-        table(['ID', 'Status', 'Images', 'Size', 'Created'], $data);
-
-        $this->showEndNavigation('databaseMenu');
-    }
-
-    private function viewImages(): void
-    {
-        $limit = text(
-            label: 'How many images to show? (or leave empty to go back)',
-            default: '20',
-            required: false,
-            validate: fn($v) => $v && !is_numeric($v) ? 'Must be a number' : null
-        );
-
-        if (empty($limit)) {
-            return;
-        }
-
-        $images = Image::with('metadata')->latest()->take((int)$limit)->get();
-
-        if ($images->isEmpty()) {
-            warning('No images found.');
-            $this->showEndNavigation('databaseMenu');
-            return;
-        }
-
-        $data = $images->map(function ($image) {
-            $tag = $image->metadata?->tag ?? '-';
-            $tagIcon = match($tag) {
-                'flash' => '⚡',
-                'ambient' => '☀️',
-                default => '❓'
-            };
-
-            return [
-                'Filename' => substr($image->filename, 0, 30),
-                'Flash' => $image->metadata?->flash_status ?? 'N/A',
-                'ISO' => $image->metadata?->iso ?? 'N/A',
-                'Tag' => $tagIcon . ' ' . $tag,
-                'Size' => $this->formatBytes($image->file_size),
-            ];
-        })->toArray();
-
-        table(['Filename', 'Flash', 'ISO', 'Tag', 'Size'], $data);
-
-        $this->showEndNavigation('databaseMenu');
-    }
-
-    private function viewStacks(): void
-    {
-        $stacks = ExposureStack::with('batch')->latest()->take(15)->get();
-
-        if ($stacks->isEmpty()) {
-            warning('No exposure stacks found.');
-            $this->showEndNavigation('databaseMenu');
-            return;
-        }
-
-        $data = $stacks->map(function ($stack) {
-            return [
-                'ID' => $stack->id,
-                'Batch' => substr($stack->batch_id, 0, 8) . '...',
-                'Flash' => $stack->flash_count ?? 0,
-                'Ambient' => $stack->ambient_count ?? 0,
-                'Status' => $stack->status ?? 'pending',
-            ];
-        })->toArray();
-
-        table(['ID', 'Batch', 'Flash', 'Ambient', 'Status'], $data);
+        table(['ID', 'Project', 'Status', 'Files', 'Created'], $data);
 
         $this->showEndNavigation('databaseMenu');
     }
@@ -1105,8 +1440,6 @@ class HomeCommand extends Command
                 'live' => 'Live Capture (photos-capture-live)',
                 'sync' => 'Sync from Photos.app (photos-capture-sync)',
                 'debug' => 'Debug Tethering (photos-tether-debug)',
-                'status' => 'Check Photos.app Status',
-                'import' => 'Import from Folder',
                 'help' => 'Tethering Help & Requirements',
                 'back' => 'Back to Main Menu',
             ],
@@ -1116,8 +1449,6 @@ class HomeCommand extends Command
             'live' => $this->runTetherScript('photos-capture-live'),
             'sync' => $this->runTetherScript('photos-capture-sync'),
             'debug' => $this->runTetherScript('photos-tether-debug'),
-            'status' => $this->checkPhotosStatus(),
-            'import' => $this->importFromFolder(),
             'help' => $this->showTetheringHelp(),
             'back' => null,
         };
@@ -1196,79 +1527,6 @@ BASH;
         Process::run("chmod +x '{$path}'");
         
         info("Created placeholder: {$path}");
-    }
-
-    private function checkPhotosStatus(): void
-    {
-        info('Checking system status...');
-        $this->line('');
-
-        // Check Photos.app
-        $photosResult = Process::run('pgrep -x Photos');
-        if ($photosResult->successful()) {
-            $this->line('<fg=green>✓</> Photos.app is running (PID: ' . trim($photosResult->output()) . ')');
-        } else {
-            $this->line('<fg=yellow>○</> Photos.app is not running');
-        }
-
-        // Check for connected cameras via system_profiler
-        $cameraResult = Process::run('system_profiler SPUSBDataType 2>/dev/null | grep -i camera');
-        if ($cameraResult->successful() && trim($cameraResult->output())) {
-            $this->line('<fg=green>✓</> Camera detected via USB');
-        } else {
-            $this->line('<fg=yellow>○</> No camera detected via USB');
-        }
-
-        // Check Image Capture
-        $imageCaptureResult = Process::run('pgrep -x "Image Capture"');
-        if ($imageCaptureResult->successful()) {
-            $this->line('<fg=green>✓</> Image Capture is running');
-        } else {
-            $this->line('<fg=gray>○</> Image Capture not running');
-        }
-
-        $this->line('');
-
-        if (!$photosResult->successful()) {
-            if (confirm('Open Photos.app?')) {
-                Process::run('open -a Photos');
-                info('Photos.app launched');
-            }
-        }
-
-        $this->showEndNavigation('tetheringMenu');
-    }
-
-    private function importFromFolder(): void
-    {
-        $path = text(
-            label: 'Enter folder path to import from (or leave empty to go back)',
-            placeholder: '/Users/you/Pictures/CameraImport',
-            required: false,
-            validate: fn($v) => $v && !is_dir($v) ? 'Directory does not exist' : null
-        );
-
-        if (empty($path)) {
-            return;
-        }
-
-        $files = glob("{$path}/*.{jpg,jpeg,JPG,JPEG}", GLOB_BRACE);
-
-        if (empty($files)) {
-            warning('No JPEG files found in that directory.');
-            $this->showEndNavigation('tetheringMenu');
-            return;
-        }
-
-        info('Found ' . count($files) . ' JPEG files.');
-
-        if (confirm('Import these files to a new batch?')) {
-            // This would integrate with your upload controller
-            warning('Batch import not yet integrated with CLI.');
-            note('Use the web interface at: ' . config('app.url') . '/upload');
-        }
-
-        $this->showEndNavigation('tetheringMenu');
     }
 
     private function showTetheringHelp(): void
